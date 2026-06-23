@@ -1,0 +1,16 @@
+﻿# Dependências
+node_modules/
+**/node_modules/
+
+# Variáveis de ambiente (contêm senhas)
+.env
+**/.env
+
+# Build / saída
+dist/
+**/dist/
+out-tsc/
+
+# Logs e temporários
+*.log
+.DS_Store

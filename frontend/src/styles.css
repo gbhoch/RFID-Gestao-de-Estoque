@@ -1,0 +1,326 @@
+/* ============================================================
+   Sistema de Gestão Patrimonial RFID — Design System
+   Paleta: verde-petróleo (teal) sóbrio · tema claro/escuro
+   O tema base do DevExtreme é carregado via angular.json (styles[]).
+   ============================================================ */
+
+:root {
+  /* ---- Cor de marca (teal) ---- */
+  --brand-900: #06302b;
+  --brand-800: #0a423a;
+  --brand-700: #0f5c52;
+  --brand-600: #14756a;   /* primária */
+  --brand-500: #1a8f81;
+  --brand-400: #36a89a;
+  --brand-300: #6fc4ba;
+  --brand-100: #d6ece9;
+  --brand-50:  #eef6f5;
+
+  /* ---- Neutros (tema claro, padrão) ---- */
+  --bg:          #f6f8f8;
+  --surface:     #ffffff;
+  --surface-2:   #f0f4f3;
+  --border:      #e2e8e7;
+  --border-strong:#cbd6d4;
+  --text:        #14211f;
+  --text-soft:   #51635f;
+  --text-faint:  #8a9a96;
+
+  /* ---- Semânticas ---- */
+  --success: #1a8f6f;
+  --warning: #c08a1e;
+  --danger:  #c0432f;
+  --info:    var(--brand-600);
+
+  /* ---- Forma e profundidade ---- */
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(10, 40, 36, .06);
+  --shadow:    0 4px 16px rgba(10, 40, 36, .08);
+  --shadow-lg: 0 12px 40px rgba(10, 40, 36, .14);
+
+  /* ---- Tipografia ---- */
+  --font-sans: 'Inter', 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  /* ---- Layout ---- */
+  --sidebar-w: 248px;
+  --topbar-h:  60px;
+}
+
+/* ---- Tema escuro ---- */
+:root[data-theme='dark'] {
+  --bg:          #0c1413;
+  --surface:     #121c1a;
+  --surface-2:   #182523;
+  --border:      #243532;
+  --border-strong:#324744;
+  --text:        #e6efed;
+  --text-soft:   #9fb2ae;
+  --text-faint:  #6b817d;
+  --brand-600:   #1ea291;
+  --brand-100:   #16302c;
+  --brand-50:    #122421;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow:    0 4px 16px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, .5);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -.01em; color: var(--text); }
+a { color: var(--brand-600); text-decoration: none; }
+
+/* ============================================================
+   Utilitários reutilizáveis
+   ============================================================ */
+.page-title {
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+.page-sub {
+  color: var(--text-soft);
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Pílula de status genérica */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.pill::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pill-success { background: rgba(26,143,111,.12); color: var(--success); }
+.pill-warning { background: rgba(192,138,30,.14); color: var(--warning); }
+.pill-danger  { background: rgba(192,67,47,.12);  color: var(--danger); }
+.pill-neutral { background: var(--surface-2);      color: var(--text-soft); }
+.pill-info    { background: var(--brand-100);      color: var(--brand-600); }
+
+/* ============================================================
+   Overrides DevExtreme — alinhar o tema teal aos nossos tokens
+   ============================================================ */
+.dx-widget { font-family: var(--font-sans); color: var(--text); }
+
+/* ---- DataGrid: fundo, texto e células (cobre tema claro e escuro) ---- */
+.dx-datagrid,
+.dx-datagrid-rowsview,
+.dx-datagrid .dx-datagrid-content,
+.dx-datagrid-rowsview .dx-datagrid-content {
+  background: var(--surface);
+  color: var(--text);
+}
+.dx-datagrid .dx-row > td,
+.dx-datagrid .dx-row > tr > td {
+  color: var(--text);
+  background: var(--surface);
+  padding: 12px 14px;
+  border-color: var(--border);
+}
+.dx-datagrid-headers {
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.dx-datagrid-headers .dx-header-row > td {
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+.dx-datagrid-rowsview .dx-row-alt > td,
+.dx-datagrid-rowsview .dx-row-alt > tr > td {
+  background: var(--surface-2);
+}
+.dx-datagrid-rowsview .dx-row.dx-data-row:hover > td {
+  background: var(--brand-50) !important;
+  color: var(--text);
+}
+.dx-datagrid-rowsview { border: none; }
+.dx-datagrid .dx-row-lines > td { border-bottom: 1px solid var(--border); }
+/* Texto do "nenhum registro" e overlay de carga */
+.dx-datagrid .dx-datagrid-nodata { color: var(--text-faint); }
+.dx-datagrid .dx-datagrid-rowsview .dx-empty { color: var(--text-faint); }
+.dx-loadpanel-content, .dx-loadindicator { color: var(--text-soft); }
+/* Ícones de ação (editar/excluir) na coluna de comandos */
+.dx-datagrid .dx-link { color: var(--brand-600); }
+.dx-datagrid .dx-link-delete { color: var(--danger); }
+
+/* ---- Botões DevExtreme ---- */
+.dx-button { border-radius: var(--radius-sm); }
+.dx-button-mode-contained.dx-button-default {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+}
+.dx-button-mode-contained.dx-button-default.dx-state-hover { background: var(--brand-700); }
+/* Botão "adicionar" da toolbar */
+.dx-datagrid-addrow-button .dx-icon { color: var(--brand-600); }
+
+/* Botões do popup de edição: Salvar (teal) / Cancelar (vermelho suave) */
+.dx-popup-bottom .dx-button-mode-contained.dx-button-default,
+.dx-popup-bottom .dx-button-mode-text.dx-button-default {
+  background: var(--brand-600);
+  color: #fff;
+  border-color: var(--brand-600);
+}
+.dx-popup-bottom .dx-button-mode-contained.dx-button-default.dx-state-hover,
+.dx-popup-bottom .dx-button-mode-text.dx-button-default.dx-state-hover {
+  background: var(--brand-700);
+}
+/* O botão "Cancel" é o normal (não-default) na barra do popup */
+.dx-popup-bottom .dx-button-mode-text.dx-button-normal,
+.dx-popup-bottom .dx-button-mode-contained.dx-button-normal {
+  background: transparent;
+  color: var(--danger);
+  border-color: transparent;
+}
+.dx-popup-bottom .dx-button-mode-text.dx-button-normal.dx-state-hover,
+.dx-popup-bottom .dx-button-mode-contained.dx-button-normal.dx-state-hover {
+  background: rgba(192,67,47,.10);
+  color: var(--danger);
+}
+
+/* ---- Toolbar do grid ---- */
+.dx-toolbar { background: transparent; }
+.dx-toolbar .dx-toolbar-items-container { color: var(--text); }
+
+/* ---- Inputs / editores (forms e busca) ---- */
+.dx-texteditor.dx-editor-filled,
+.dx-texteditor.dx-editor-outlined {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.dx-texteditor-input { color: var(--text); }
+.dx-placeholder { color: var(--text-faint); }
+.dx-texteditor.dx-state-focused.dx-editor-filled::after,
+.dx-texteditor.dx-state-focused.dx-editor-outlined { border-color: var(--brand-600); }
+.dx-texteditor.dx-editor-outlined { border-color: var(--border-strong); }
+/* Labels dos formulários */
+.dx-field-item-label-text, .dx-form .dx-field-item-label { color: var(--text-soft); }
+
+/* ---- Dropdowns / listas suspensas (selects de lookup) ---- */
+.dx-dropdowneditor-overlay .dx-overlay-content,
+.dx-dropdowneditor-overlay .dx-popup-content,
+.dx-list,
+.dx-list .dx-scrollable-content,
+.dx-selectbox-popup-wrapper .dx-list {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+}
+.dx-list-item,
+.dx-list-item .dx-item-content,
+.dx-list-item-content {
+  color: var(--text) !important;
+  background: transparent;
+}
+.dx-list-item.dx-state-hover,
+.dx-list-item.dx-state-hover .dx-item-content {
+  background: var(--surface-2) !important;
+  color: var(--text) !important;
+}
+.dx-list-item.dx-list-item-selected,
+.dx-list-item.dx-state-focused {
+  background: var(--brand-50) !important;
+  color: var(--brand-600) !important;
+}
+/* Borda do overlay do dropdown */
+.dx-dropdowneditor-overlay .dx-overlay-content {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ---- Paginação ---- */
+.dx-pager { background: transparent; border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-soft); }
+.dx-pager .dx-page, .dx-pager .dx-info { color: var(--text-soft); }
+.dx-pager .dx-page.dx-selection {
+  background: var(--brand-600);
+  color: #fff;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- Popups (formulários de edição) ---- */
+.dx-popup-content { background: var(--surface); color: var(--text); }
+.dx-overlay-content.dx-popup-normal {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.dx-popup-title {
+  background: var(--surface);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.dx-popup-bottom { background: var(--surface); border-top: 1px solid var(--border); }
+
+/* Scrollbar discreta */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================================================
+   Reforços finais de tema (cobre superfícies que o DevExtreme
+   ainda pinta de claro no modo escuro)
+   ============================================================ */
+.dx-datagrid-borders > .dx-datagrid-rowsview,
+.dx-datagrid-table,
+.dx-datagrid-content .dx-datagrid-table .dx-row > td,
+.dx-datagrid-rowsview .dx-datagrid-content {
+  background-color: var(--surface);
+  color: var(--text);
+}
+/* Linha de comandos (ícones editar/excluir) e fundo fixo */
+.dx-datagrid .dx-command-edit .dx-link { color: var(--brand-600); }
+.dx-datagrid .dx-command-edit .dx-link-delete { color: var(--danger); }
+.dx-datagrid-rowsview .dx-selection.dx-row > td { background: var(--brand-50); color: var(--text); }
+
+/* Painel de filtro/cabeçalho de filtro */
+.dx-datagrid-filter-row, .dx-datagrid-filter-row > td { background: var(--surface-2); }
+
+/* Editores numéricos/áreas de texto nos formulários */
+.dx-numberbox, .dx-textarea, .dx-selectbox, .dx-textbox { background: var(--surface-2); }
+.dx-texteditor-input-container .dx-texteditor-input { color: var(--text); }
+
+/* Tooltip de validação */
+.dx-invalid-message .dx-overlay-content { background: var(--danger); color: #fff; }
+
+/* Checkbox e radio (perfis, etc.) */
+.dx-checkbox-icon { border-color: var(--border-strong); }
+.dx-checkbox-checked .dx-checkbox-icon { background: var(--brand-600); border-color: var(--brand-600); }
+
+/* Texto genérico de "carregando" / overlay sobre o grid */
+.dx-datagrid .dx-datagrid-rowsview .dx-loadpanel-wrapper .dx-loadpanel-content {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+
+/* Botões de texto genéricos (ex.: toolbar) no escuro */
+.dx-button-mode-text { color: var(--text-soft); }
+.dx-button-mode-text.dx-state-hover { background: var(--surface-2); }
