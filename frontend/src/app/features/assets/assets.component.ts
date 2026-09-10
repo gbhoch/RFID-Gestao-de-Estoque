@@ -43,8 +43,9 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
               <dxi-item dataField="ownerId"></dxi-item>
               <dxi-item dataField="rfidTagId"></dxi-item>
             </dxi-item>
-            <dxi-item dataField="description" editorType="dxTextArea" [colSpan]="2"></dxi-item>
-            <dxi-item dataField="notes" editorType="dxTextArea" [colSpan]="2"></dxi-item>
+            <dxi-item dataField="notes" editorType="dxTextArea" [colSpan]="2">
+              <dxo-label text="Observação"></dxo-label>
+            </dxi-item>
           </dxo-form>
         </dxo-editing>
 
@@ -75,8 +76,7 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
         </dxi-column>
         <dxi-column dataField="acquisitionValue" caption="Valor" dataType="number"
           format="R$ #,##0.00" [width]="130"></dxi-column>
-        <dxi-column dataField="description" [visible]="false"></dxi-column>
-        <dxi-column dataField="notes" [visible]="false"></dxi-column>
+        <dxi-column dataField="notes" caption="Observação" [visible]="false"></dxi-column>
 
         <div *dxTemplate="let cell of 'statusCell'">
           <span class="pill" [class]="pillClass(cell.value)">{{ label(cell.value) }}</span>

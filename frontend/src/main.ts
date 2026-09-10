@@ -4,6 +4,10 @@ import { RouterOutlet } from '@angular/router';
 import { Component, inject } from '@angular/core';
 import { appConfig } from './app/app.config';
 import { ThemeService } from './app/core/theme.service';
+import { setupDevExtremeLocale } from './app/core/devextreme-locale';
+
+// Antes do bootstrap: os widgets leem o dicionário na hora em que são criados.
+setupDevExtremeLocale();
 
 @Component({
   selector: 'app-root',

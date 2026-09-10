@@ -38,6 +38,7 @@ export class LookupService {
   categories() { return this.listStore('categories'); }
   sectors() { return this.listStore('sectors'); }
   users() { return this.listStore('users'); }
+  roles() { return this.listStore('roles'); }
   assets() { return this.listStore('assets'); }
   rfidTags() { return this.listStore('rfid-tags'); }
 }

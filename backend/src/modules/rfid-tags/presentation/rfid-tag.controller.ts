@@ -4,7 +4,9 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RfidTagService } from '../application/rfid-tag.service';
-import { CreateRfidTagDto, UpdateRfidTagDto } from '../application/dtos/rfid-tag.dto';
+import {
+  CreateRfidTagDto, UpdateRfidTagDto, ReadBankDto, WriteBankDto, LockBankDto,
+} from '../application/dtos/rfid-tag.dto';
 import { PermissionsGuard, RequirePermission } from '../../../common/guards/permissions.guard';
 
 @ApiTags('rfid-tags')
@@ -30,6 +32,25 @@ export class RfidTagController {
   reactivate(@Param('id') id: string) { return this.service.reactivate(id); }
   @Patch(':id/retire') @RequirePermission('rfid:write')
   retire(@Param('id') id: string) { return this.service.retire(id); }
+
+  // Varredura do campo do leitor (não depende de uma etiqueta cadastrada).
+  @Post('scan') @RequirePermission('rfid:read')
+  scan() { return this.service.inventory(); }
+
+  // Operações físicas de banco de memória (encaminhadas ao leitor RFID).
+  @Post(':id/read-bank') @RequirePermission('rfid:read')
+  readBank(@Param('id') id: string, @Body() dto: ReadBankDto) {
+    return this.service.readBank(id, dto);
+  }
+  @Post(':id/write-bank') @RequirePermission('rfid:write')
+  writeBank(@Param('id') id: string, @Body() dto: WriteBankDto) {
+    return this.service.writeBank(id, dto);
+  }
+  @Post(':id/lock') @RequirePermission('rfid:write')
+  lock(@Param('id') id: string, @Body() dto: LockBankDto) {
+    return this.service.lockBank(id, dto);
+  }
+
   @Delete(':id') @RequirePermission('rfid:delete')
   remove(@Param('id') id: string) { return this.service.remove(id); }
 }

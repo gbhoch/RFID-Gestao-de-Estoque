@@ -34,7 +34,9 @@ export class UserEntity {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Column() name: string;
   @Column({ unique: true, nullable: true }) registration: string;
-  @Column({ unique: true }) email: string;
+  // Opcional: nem todo operador de galpão tem e-mail corporativo. No Postgres
+  // vários NULL convivem sob UNIQUE, então a unicidade vale só para os preenchidos.
+  @Column({ unique: true, nullable: true }) email: string;
   @Column({ nullable: true }) phone: string;
   @Column({ nullable: true }) position: string;
   @Column({ name: 'sector_id', nullable: true }) sectorId: string;

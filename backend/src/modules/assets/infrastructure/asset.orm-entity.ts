@@ -8,7 +8,6 @@ export class AssetOrmEntity {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Column({ name: 'asset_code', unique: true }) assetCode: string;
   @Column() name: string;
-  @Column({ type: 'text', nullable: true }) description: string;
   @Column({ name: 'category_id' }) categoryId: string;
   @Column({ nullable: true }) brand: string;
   @Column({ nullable: true }) model: string;

@@ -7,7 +7,7 @@ import {
 export class SectorOrmEntity {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Column() name: string;
-  @Column({ unique: true }) acronym: string;
+  @Column({ unique: true, nullable: true }) acronym?: string;
   @Column({ name: 'manager_id', nullable: true }) managerId: string;
   @Column({ nullable: true }) location: string;
   @Column({ type: 'enum', enum: ['active', 'blocked', 'inactive'], default: 'active' })

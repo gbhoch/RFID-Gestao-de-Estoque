@@ -33,11 +33,15 @@ async function run() {
   });
   const operator = roleRepo.create({
     name: 'operator', description: 'Operador',
+    // sectors:read é indispensável: sem ele o seletor de setor (no coletor
+    // Android e no LookupService da web) devolve 403 — e na web o sintoma fica
+    // mascarado, porque o CustomStore engole o erro e mostra a lista vazia.
     permissions: perms.filter(
       (p) =>
         (['inventory', 'movements'].includes(p.module) &&
           (p.code.endsWith(':write') || p.code.endsWith(':read'))) ||
-        (['assets', 'rfid'].includes(p.module) && p.code.endsWith(':read')),
+        (['assets', 'rfid', 'sectors', 'categories'].includes(p.module) &&
+          p.code.endsWith(':read')),
     ),
   });
   const auditor = roleRepo.create({

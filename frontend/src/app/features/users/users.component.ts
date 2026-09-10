@@ -43,12 +43,17 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
         <dxi-column dataField="login" caption="Login" [width]="140">
           <dxi-validation-rule type="required"></dxi-validation-rule>
         </dxi-column>
+        <!-- E-mail opcional: nem todo operador de galpão tem um. A regra de
+             formato continua, mas só age quando o campo é preenchido. -->
         <dxi-column dataField="email" caption="E-mail">
-          <dxi-validation-rule type="required"></dxi-validation-rule>
           <dxi-validation-rule type="email"></dxi-validation-rule>
         </dxi-column>
         <dxi-column dataField="password" caption="Senha" [visible]="false"></dxi-column>
-        <dxi-column dataField="roleId" caption="Perfil" [visible]="false"></dxi-column>
+        <!-- Perfil visível no grid: é o dado que define o que a pessoa pode fazer. -->
+        <dxi-column dataField="roleId" caption="Perfil" [width]="140">
+          <dxi-validation-rule type="required"></dxi-validation-rule>
+          <dxo-lookup [dataSource]="roles" valueExpr="id" displayExpr="name"></dxo-lookup>
+        </dxi-column>
         <dxi-column dataField="position" caption="Cargo"></dxi-column>
         <dxi-column dataField="phone" caption="Telefone" [visible]="false"></dxi-column>
         <dxi-column dataField="sectorId" caption="Setor" [visible]="false">
@@ -72,6 +77,7 @@ export class UsersComponent {
   private lookup = inject(LookupService);
   store = this.factory.create('users');
   sectors = this.lookup.sectors();
+  roles = this.lookup.roles();
   statuses = [
     { value: 'active', text: 'Ativo' },
     { value: 'blocked', text: 'Bloqueado' },

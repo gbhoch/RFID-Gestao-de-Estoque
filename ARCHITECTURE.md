@@ -92,16 +92,35 @@ Diagrama textual em `database/DER.md`; DDL em `database/schema.sql`.
 
 ## 5. Integração RFID
 
-`RfidIngestionService` aceita leituras por três canais que convergem para o
-mesmo caso de uso `RegisterRfidReadUseCase`:
+A ingestão de inventário é **uma só**, pelo módulo `inventory`:
+`POST /api/v1/inventory/:id/reads`, que amarra cada leitura a uma
+`InventorySectorVisit`. Essa amarração não é detalhe de implementação — sem saber
+o setor onde a tag foi lida, a conciliação não distingue "sumiu" de "está em
+outro setor", e os dois tipos de divergência perdem sentido.
 
-1. **REST** `POST /api/v1/rfid/reads` (handheld envia lote).
-2. **WebSocket** `/ws/rfid` (streaming em tempo real durante inventário).
-3. **TCP/SDK** adapter na infraestrutura (porta de integração isolada).
+Os dois clientes usam o mesmo endpoint:
 
-Payload normalizado: `{ epc, timestamp, deviceId, rssi, operatorId }`.
-Toda leitura é persistida em `inventory_reads` e logada. A resolução EPC→Asset
-é feita pela `RfidTagRepository`.
+| Cliente | Como lê | Particularidade |
+|---|---|---|
+| Web (`inventory-active`) | leitor de mesa em modo teclado (`ReaderCaptureDirective`) | online, um EPC por vez |
+| Coletor Android (`RfidInventory`) | leitor TSL por Bluetooth, gatilho físico | offline-first, lote com `clientBatchId` |
+
+**Idempotência.** O coletor reenvia o mesmo lote quando a resposta se perde
+(timeout depois do commit). `inventory_reads` tem índice único parcial
+`(client_batch_id, epc)` e o insert usa `ON CONFLICT DO NOTHING`, então o reenvio
+é no-op. A captura pela web não envia `clientBatchId` e não é afetada (o índice é
+parcial justamente por isso).
+
+**Tolerância ao atraso.** Coleta offline pode chegar depois do fim do trabalho de
+campo. Setor `completed` que recebe leitura **reabre**; inventário `paused` aceita
+leitura (leitura é fato bruto, pausa é estado de operação); inventário encerrado
+responde **409 `INVENTORY_FINISHED`**, e o coletor guarda a coleta em vez de
+descartá-la, até o gestor usar `PATCH /api/v1/inventory/:id/reopen`.
+
+Canais de leitura **avulsa** (fora de inventário), no módulo `rfid`:
+`POST /api/v1/rfid/reads` (resolve EPC→ativo e loga, exige `rfid:read`) e o
+WebSocket `/ws/rfid` para acompanhamento em tempo real. A resolução EPC→Asset é
+feita pela `RfidTagRepository`.
 
 ---
 

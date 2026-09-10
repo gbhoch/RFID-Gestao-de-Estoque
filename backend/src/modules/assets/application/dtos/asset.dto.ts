@@ -12,7 +12,6 @@ const STATUSES: AssetStatus[] = [
 export class CreateAssetDto {
   @ApiProperty() @IsString() @IsNotEmpty() assetCode: string;
   @ApiProperty() @IsString() @IsNotEmpty() name: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiProperty() @IsUUID() categoryId: string;
   @ApiPropertyOptional() @IsOptional() @IsString() brand?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() model?: string;

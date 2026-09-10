@@ -44,7 +44,7 @@ CREATE TABLE role_permissions (
 CREATE TABLE sectors (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name         VARCHAR(80) NOT NULL,
-  acronym      VARCHAR(10) NOT NULL UNIQUE,
+  acronym      VARCHAR(10) UNIQUE,
   manager_id   UUID,
   location     VARCHAR(120),
   status       user_status NOT NULL DEFAULT 'active',
@@ -58,7 +58,7 @@ CREATE TABLE users (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name            VARCHAR(120) NOT NULL,
   registration    VARCHAR(30) UNIQUE,             -- matrícula
-  email           VARCHAR(160) NOT NULL UNIQUE,
+  email           VARCHAR(160) UNIQUE,             -- opcional (varios NULL convivem sob UNIQUE)
   phone           VARCHAR(30),
   position        VARCHAR(80),                    -- cargo
   sector_id       UUID REFERENCES sectors(id) ON DELETE SET NULL,
@@ -108,19 +108,34 @@ CREATE TABLE categories (
 );
 
 -- ---------- RFID tags ----------
+-- Modelo de memória EPC Gen2 (ISO/IEC 18000-6C). Valores hex armazenados em
+-- MAIÚSCULO, alinhados a word de 16 bits. EPC até 512 bits (128 dígitos hex).
 CREATE TABLE rfid_tags (
-  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  epc           VARCHAR(64) NOT NULL UNIQUE,      -- Electronic Product Code
-  rfid_code     VARCHAR(64) UNIQUE,
-  serial_number VARCHAR(80),
-  manufacturer  VARCHAR(80),
-  tag_type      VARCHAR(20) NOT NULL DEFAULT 'passive',
-  status        rfid_status NOT NULL DEFAULT 'active',
-  notes         TEXT,
-  registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at    TIMESTAMPTZ
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  epc             VARCHAR(128) NOT NULL UNIQUE,    -- banco EPC (0x01), até 512 bits
+  rfid_code       VARCHAR(64) UNIQUE,
+  serial_number   VARCHAR(80),
+  manufacturer    VARCHAR(80),
+  tag_type        VARCHAR(20) NOT NULL DEFAULT 'passive',
+  source          VARCHAR(20) NOT NULL DEFAULT 'manual',  -- manual | reader | import
+  -- ---- Bancos de memória Gen2 ----
+  tid             VARCHAR(128) UNIQUE,             -- banco TID (0x10), read-only
+  pc_word         VARCHAR(4),                      -- Protocol Control (1 word do EPC)
+  epc_word_count  INT,
+  user_memory     TEXT,                            -- banco User (0x11), tamanho variável
+  access_password VARCHAR(8),                      -- banco Reservado (0x00), 32 bits
+  kill_password   VARCHAR(8),                      -- banco Reservado (0x00), 32 bits
+  epc_bits        INT,                             -- tamanhos reportados pelo leitor
+  tid_bits        INT,
+  user_bits       INT,
+  lock_state      JSONB,                           -- estado de lock por banco
+  last_read_at    TIMESTAMPTZ,
+  status          rfid_status NOT NULL DEFAULT 'active',
+  notes           TEXT,
+  registered_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ
 );
 
 -- ---------- Assets ----------
@@ -128,7 +143,6 @@ CREATE TABLE assets (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   asset_code        VARCHAR(40) NOT NULL UNIQUE,  -- código patrimonial
   name              VARCHAR(160) NOT NULL,
-  description       TEXT,
   category_id       UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
   brand             VARCHAR(80),
   model             VARCHAR(80),
@@ -164,32 +178,75 @@ CREATE TABLE asset_movements (
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ---------- Inventory ----------
-CREATE TABLE inventory_sessions (
+-- ---------- Inventory (modelo coleta × julgamento) ----------
+-- Um inventário cobre VÁRIOS setores visitados; a conciliação é ADIADA para o
+-- fechamento (ver backend/src/modules/inventory/README.md). status/tipo como
+-- VARCHAR+CHECK (não enum) para simplificar migrações idempotentes.
+CREATE TABLE inventories (
   id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  sector_id          UUID NOT NULL REFERENCES sectors(id) ON DELETE RESTRICT,
-  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  status             inventory_status NOT NULL DEFAULT 'open',
-  expected_count     INT NOT NULL DEFAULT 0,
-  found_count        INT NOT NULL DEFAULT 0,
-  divergent_count    INT NOT NULL DEFAULT 0,
-  accuracy_rate      NUMERIC(5,2),
+  code               VARCHAR(40) NOT NULL UNIQUE,        -- ex.: INV-2026-001
+  description        TEXT,
+  status             VARCHAR(20) NOT NULL DEFAULT 'in_progress'
+                     CHECK (status IN ('in_progress','paused','finished','cancelled')),
   started_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at        TIMESTAMPTZ,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  expected_count     INT,                                -- snapshot da conciliação
+  conform_count      INT,
+  out_of_scope_count INT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE inventory_sector_visits (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  inventory_id UUID NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  sector_id    UUID NOT NULL REFERENCES sectors(id) ON DELETE RESTRICT,
+  status       VARCHAR(20) NOT NULL DEFAULT 'in_progress'
+               CHECK (status IN ('in_progress','completed')),
+  started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (inventory_id, sector_id)
 );
 
 CREATE TABLE inventory_reads (
-  id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  session_id         UUID NOT NULL REFERENCES inventory_sessions(id) ON DELETE CASCADE,
-  epc                VARCHAR(64) NOT NULL,
-  asset_id           UUID REFERENCES assets(id) ON DELETE SET NULL,
-  rfid_tag_id        UUID REFERENCES rfid_tags(id) ON DELETE SET NULL,
-  device_id          VARCHAR(60),
-  rssi               INT,
-  operator_id        UUID REFERENCES users(id) ON DELETE SET NULL,
-  is_unexpected      BOOLEAN NOT NULL DEFAULT FALSE, -- lido fora do setor
-  read_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  inventory_id    UUID NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  sector_visit_id UUID NOT NULL REFERENCES inventory_sector_visits(id) ON DELETE CASCADE,
+  epc             VARCHAR(128) NOT NULL,                 -- FATO BRUTO (sem julgamento)
+  asset_id        UUID REFERENCES assets(id) ON DELETE SET NULL,
+  rfid_tag_id     UUID REFERENCES rfid_tags(id) ON DELETE SET NULL,
+  device_id       VARCHAR(60),
+  rssi            INT,
+  operator_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+  read_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Coletor Android: chave de idempotencia do lote (o app reenvia o mesmo
+  -- lote quando a resposta se perde), hits deduplicados e TID da etiqueta.
+  client_batch_id UUID,
+  read_count      INT NOT NULL DEFAULT 1,
+  tid             VARCHAR(64)
+);
+
+-- Indice PARCIAL: a captura pela web nao manda client_batch_id.
+CREATE UNIQUE INDEX uq_inv_reads_batch_epc
+  ON inventory_reads (client_batch_id, epc) WHERE client_batch_id IS NOT NULL;
+
+CREATE TABLE inventory_discrepancies (
+  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  inventory_id        UUID NOT NULL REFERENCES inventories(id) ON DELETE CASCADE,
+  type                VARCHAR(20) NOT NULL
+                      CHECK (type IN ('location_mismatch','not_found','unknown_tag')),
+  asset_id            UUID REFERENCES assets(id) ON DELETE SET NULL,
+  epc                 VARCHAR(128),
+  expected_sector_id  UUID REFERENCES sectors(id) ON DELETE SET NULL,
+  found_sector_id     UUID REFERENCES sectors(id) ON DELETE SET NULL,
+  resolution          VARCHAR(20)
+                      CHECK (resolution IN ('accept_location','justified','mark_missing','register_tag')),
+  resolution_notes    TEXT,
+  resolved_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at         TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ---------- Location history ----------
@@ -249,8 +306,11 @@ CREATE INDEX idx_rfid_epc           ON rfid_tags(epc);
 CREATE INDEX idx_rfid_status        ON rfid_tags(status);
 CREATE INDEX idx_mov_asset          ON asset_movements(asset_id);
 CREATE INDEX idx_mov_occurred       ON asset_movements(occurred_at);
-CREATE INDEX idx_inv_reads_session  ON inventory_reads(session_id);
-CREATE INDEX idx_inv_reads_epc      ON inventory_reads(epc);
+CREATE INDEX idx_inv_visits_inventory ON inventory_sector_visits(inventory_id);
+CREATE INDEX idx_inv_reads_inventory  ON inventory_reads(inventory_id);
+CREATE INDEX idx_inv_reads_visit      ON inventory_reads(sector_visit_id);
+CREATE INDEX idx_inv_reads_epc        ON inventory_reads(epc);
+CREATE INDEX idx_inv_disc_inventory   ON inventory_discrepancies(inventory_id);
 CREATE INDEX idx_loc_asset          ON asset_location_history(asset_id);
 CREATE INDEX idx_audit_user         ON audit_logs(user_id);
 CREATE INDEX idx_audit_occurred     ON audit_logs(occurred_at);

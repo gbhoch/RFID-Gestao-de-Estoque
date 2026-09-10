@@ -1,5 +1,9 @@
-import { Module, Injectable, Inject, Controller, Post, Body, Logger } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+  Module, Injectable, Inject, Controller, Post, Body, Logger, UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { PermissionsGuard, RequirePermission } from '../../common/guards/permissions.guard';
 import {
   WebSocketGateway, SubscribeMessage, MessageBody, WebSocketServer,
 } from '@nestjs/websockets';
@@ -56,12 +60,21 @@ export class RfidIngestionService {
 }
 
 // ---------- REST controller ----------
+/**
+ * Canal de leitura AVULSA (resolve EPC -> asset e loga; NÃO persiste).
+ *
+ * A ingestão de inventário NÃO passa por aqui: ela é `POST /api/v1/inventory/:id/reads`,
+ * que amarra a leitura à visita de setor e é idempotente por `clientBatchId`. Este
+ * módulo existe para o canal WebSocket de tempo real e para consultas pontuais de EPC.
+ */
 @ApiTags('rfid')
+@ApiBearerAuth()
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller({ path: 'rfid', version: '1' })
 export class RfidController {
   constructor(private service: RfidIngestionService) {}
 
-  @Post('reads')
+  @Post('reads') @RequirePermission('rfid:read')
   reads(@Body() dto: RfidBatchDto) {
     return this.service.registerBatch(dto.reads);
   }

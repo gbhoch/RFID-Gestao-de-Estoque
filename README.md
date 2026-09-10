@@ -65,13 +65,39 @@ npm start           # http://localhost:4200
    chamada original; falhando, faz logout.
 4. RBAC: cada rota protegida exige uma permissão (`assets:read`, `assets:write`...).
 
-## Integração com handhelds RFID
-- Lote via REST: `POST /api/v1/rfid/reads` com `{ reads: [{ epc, deviceId, rssi, operatorId, timestamp }] }`.
-- Tempo real: WebSocket em `/ws/rfid`, evento `rfid:read`; o servidor responde/
-  faz broadcast de `rfid:resolved` para a tela de inventário.
-- TCP/SDK do fabricante: implementar um adapter na infraestrutura que normalize
-  para o mesmo payload e chame `RfidIngestionService.register`.
+## Integração com o coletor Android (`../RfidInventory`)
 
+O coletor TSL é **cliente do inventário**, não um canal de ingestão paralelo. Faz
+pela API o mesmo fluxo da tela web:
+
+1. `POST /api/v1/auth/login` — operador (perfil `operator`).
+2. `GET /api/v1/inventory/current` e `GET /api/v1/sectors` — contexto, cacheado no
+   aparelho para o operador trabalhar sem rede.
+3. `POST /api/v1/inventory/:id/sectors` — abre/retoma a visita (idempotente).
+4. `POST /api/v1/inventory/:id/reads` — leituras, com **`clientBatchId`** como chave
+   de idempotência (índice único parcial `(client_batch_id, epc)`): o app reenvia o
+   mesmo lote quando a resposta se perde, e o servidor ignora a repetição.
+
+Três regras existem por causa do modo offline:
+
+- Coleta que chega com o setor já `completed` **reabre a visita** em vez de recusar.
+- Inventário `in_progress` **ou `paused`** aceita leitura — leitura é fato bruto.
+- Inventário encerrado responde **409 `INVENTORY_FINISHED`** (não 400): o app segura a
+  coleta em vez de descartá-la. O gestor usa `PATCH /api/v1/inventory/:id/reopen`, que
+  só é permitido enquanto nenhuma divergência tiver sido resolvida.
+
+Aplicar a migração antes de usar o coletor:
+
+```bash
+docker compose exec -T postgres psql -U rfid -d rfid_assets \
+  < database/migrations/2026-08-24_inventory_reads_collector.sql
+```
+
+### Outros canais de leitura (avulsa, não inventário)
+- `POST /api/v1/rfid/reads` — resolve EPC → ativo e loga; exige `rfid:read`.
+- Tempo real: WebSocket em `/ws/rfid`, evento `rfid:read`; o servidor faz broadcast
+  de `rfid:resolved`.
+- Leitor de mesa para comissionar etiqueta: agente `reader-bridge/` no Windows.
 ## O que está pronto e como expandir
 Veja a seção 7 e 8 de `ARCHITECTURE.md`. Núcleo de segurança, módulo de
 Patrimônios (vertical completa de referência) e ingestão RFID estão

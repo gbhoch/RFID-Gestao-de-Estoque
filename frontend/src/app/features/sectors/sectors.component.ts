@@ -37,9 +37,7 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
         <dxi-column dataField="name" caption="Nome">
           <dxi-validation-rule type="required"></dxi-validation-rule>
         </dxi-column>
-        <dxi-column dataField="acronym" caption="Sigla" [width]="120">
-          <dxi-validation-rule type="required"></dxi-validation-rule>
-        </dxi-column>
+        <dxi-column dataField="acronym" caption="Sigla" [width]="120"></dxi-column>
         <dxi-column dataField="managerId" caption="Responsável" [visible]="false">
           <dxo-lookup [dataSource]="users" valueExpr="id" displayExpr="name"></dxo-lookup>
         </dxi-column>

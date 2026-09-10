@@ -183,33 +183,87 @@ a { color: var(--brand-600); text-decoration: none; }
 /* Botão "adicionar" da toolbar */
 .dx-datagrid-addrow-button .dx-icon { color: var(--brand-600); }
 
-/* Botões do popup de edição: Salvar (teal) / Cancelar (vermelho suave) */
-.dx-popup-bottom .dx-button-mode-contained.dx-button-default,
-.dx-popup-bottom .dx-button-mode-text.dx-button-default {
+/* ---- Botões do rodapé do popup de edição: Confirmar (teal) / Cancelar (vermelho) ----
+
+   O DataGrid monta esse rodapé sozinho, com dois dxButton na ordem
+   [Confirmar, Cancelar], ambos em location:'after' (ver _showEditPopup no
+   grid_core/editing). No tema Material os dois saem com AS MESMAS classes
+   (.dx-button-normal.dx-button-mode-contained) — o `type: 'default'` do Salvar
+   só é aplicado no tema Fluent.
+
+   Por isso a distinção aqui é POSICIONAL: primeiro item = Confirmar, último =
+   Cancelar. A regra anterior mirava .dx-button-default, que nunca existe neste
+   tema, e o seletor do Cancelar acabava pegando os dois botões.
+
+   Escopo em .dx-datagrid-edit-popup para não afetar outros popups. */
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:first-child .dx-button {
   background: var(--brand-600);
-  color: #fff;
   border-color: var(--brand-600);
 }
-.dx-popup-bottom .dx-button-mode-contained.dx-button-default.dx-state-hover,
-.dx-popup-bottom .dx-button-mode-text.dx-button-default.dx-state-hover {
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:first-child .dx-button .dx-button-text {
+  color: #fff;
+}
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:first-child .dx-button.dx-state-hover {
   background: var(--brand-700);
+  border-color: var(--brand-700);
 }
-/* O botão "Cancel" é o normal (não-default) na barra do popup */
-.dx-popup-bottom .dx-button-mode-text.dx-button-normal,
-.dx-popup-bottom .dx-button-mode-contained.dx-button-normal {
+
+/* Cancelar: contorno vermelho, para o operador distinguir de relance. */
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:last-child .dx-button {
   background: transparent;
-  color: var(--danger);
-  border-color: transparent;
+  border: 1px solid var(--danger);
+  box-shadow: none;
 }
-.dx-popup-bottom .dx-button-mode-text.dx-button-normal.dx-state-hover,
-.dx-popup-bottom .dx-button-mode-contained.dx-button-normal.dx-state-hover {
-  background: rgba(192,67,47,.10);
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:last-child .dx-button .dx-button-text {
   color: var(--danger);
+}
+.dx-datagrid-edit-popup .dx-popup-bottom .dx-toolbar-after .dx-toolbar-item:last-child .dx-button.dx-state-hover {
+  background: rgba(192, 67, 47, .10);
+  border-color: var(--danger);
+}
+
+/* ---- Botões de proteção (lock) da etiqueta — ação sensível ---- */
+.lock-actions .dx-button-mode-contained.dx-button-danger {
+  background: var(--danger); border-color: var(--danger); color: #fff;
+}
+.lock-actions .dx-button-mode-contained.dx-button-danger.dx-state-hover {
+  background: #a53827; border-color: #a53827;
+}
+.lock-actions .dx-button-mode-outlined {
+  border-color: var(--border-strong); color: var(--text-soft);
+}
+.lock-actions .dx-button-mode-outlined.dx-state-hover { background: var(--surface-2); }
+/* "Permanente": realça o caráter irreversível quando marcado */
+.lock-actions .lock-perm.dx-checkbox-checked .dx-checkbox-icon {
+  background: var(--danger); border-color: var(--danger);
 }
 
 /* ---- Toolbar do grid ---- */
 .dx-toolbar { background: transparent; }
 .dx-toolbar .dx-toolbar-items-container { color: var(--text); }
+
+/* ---- Tab panel (bancos de memória): a barra de abas segue o tema ---- */
+.dx-tabpanel .dx-tabs,
+.dx-tabpanel .dx-tab,
+.dx-tabpanel .dx-tabs-nav-button,
+.dx-tabpanel .dx-tabs-nav-button.dx-state-disabled {
+  background-color: var(--surface);
+}
+.dx-tabpanel .dx-tab { color: var(--text-soft); }
+.dx-tabpanel .dx-tab.dx-tab-selected,
+.dx-tabpanel .dx-tab.dx-tab-selected .dx-icon { color: var(--brand-600); }
+.dx-tabpanel .dx-tab.dx-state-hover { background-color: var(--surface-2); }
+
+/* ---- Gráficos (dashboard): legendas e rótulos de eixo seguem o tema ---- */
+/* O DevExtreme pinta o texto do SVG de escuro (tema light) via atributo inline;
+   recolorimos legenda/eixos/rótulos com o token para garantir leitura no modo escuro. */
+.dxc-legend text,
+.dxc-elements-axes-group text,
+.dxc-strips-labels-group text,
+.dxc-axes-group text,
+.dxc-labels-group text {
+  fill: var(--text-soft) !important;
+}
 
 /* ---- Inputs / editores (forms e busca) ---- */
 .dx-texteditor.dx-editor-filled,

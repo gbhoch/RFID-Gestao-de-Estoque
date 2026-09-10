@@ -11,8 +11,11 @@ export class AssetService {
   ) {}
 
   async create(dto: CreateAssetDto): Promise<Asset> {
-    const asset = Object.assign(new Asset(), dto);
-    if (dto.rfidTagId) asset.attachTag(dto.rfidTagId);
+    // Não copiar rfidTagId no assign: attachTag é quem associa a etiqueta (e faz
+    // a transição de status), aplicando a regra de negócio "só associa se não houver".
+    const { rfidTagId, ...rest } = dto;
+    const asset = Object.assign(new Asset(), rest);
+    if (rfidTagId) asset.attachTag(rfidTagId);
     return this.repo.create(asset);
   }
 

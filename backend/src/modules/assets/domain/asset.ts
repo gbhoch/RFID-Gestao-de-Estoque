@@ -8,7 +8,6 @@ export class Asset {
   id?: string;
   assetCode: string;
   name: string;
-  description?: string;
   categoryId: string;
   brand?: string;
   model?: string;
