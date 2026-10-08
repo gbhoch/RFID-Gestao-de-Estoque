@@ -48,9 +48,15 @@ CREATE TABLE sectors (
   manager_id   UUID,
   location     VARCHAR(120),
   status       user_status NOT NULL DEFAULT 'active',
+  -- Origem no ERP (patlocalbem: EMPRESA + CODIGO); NULL = cadastro manual
+  erp_empresa   INTEGER,
+  erp_codigo    INTEGER,
+  erp_synced_at TIMESTAMPTZ,
+  erp_hash      VARCHAR(64),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at   TIMESTAMPTZ
+  deleted_at   TIMESTAMPTZ,
+  CONSTRAINT ck_sectors_erp_key CHECK ((erp_empresa IS NULL) = (erp_codigo IS NULL))
 );
 
 -- ---------- Users ----------
@@ -102,9 +108,15 @@ CREATE TABLE categories (
   name        VARCHAR(80) NOT NULL UNIQUE,
   description VARCHAR(255),
   status      user_status NOT NULL DEFAULT 'active',
+  -- Origem no ERP (patgrpbem: EMPRESA + CODIGO); NULL = cadastro manual
+  erp_empresa   INTEGER,
+  erp_codigo    INTEGER,
+  erp_synced_at TIMESTAMPTZ,
+  erp_hash      VARCHAR(64),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at  TIMESTAMPTZ
+  deleted_at  TIMESTAMPTZ,
+  CONSTRAINT ck_categories_erp_key CHECK ((erp_empresa IS NULL) = (erp_codigo IS NULL))
 );
 
 -- ---------- RFID tags ----------
@@ -156,11 +168,16 @@ CREATE TABLE assets (
   warranty_until    DATE,
   rfid_tag_id       UUID UNIQUE REFERENCES rfid_tags(id) ON DELETE SET NULL, -- 1:0..1
   status            asset_status NOT NULL DEFAULT 'available',
-  erp_asset_id      VARCHAR(60),
+  -- Origem no ERP (patbem: EMPRESA + SEQUENCIAL); NULL = cadastro manual
+  erp_empresa       INTEGER,
+  erp_sequencial    BIGINT,
+  erp_synced_at     TIMESTAMPTZ,
+  erp_hash          VARCHAR(64),                  -- hash do payload de origem
   notes             TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at        TIMESTAMPTZ
+  deleted_at        TIMESTAMPTZ,
+  CONSTRAINT ck_assets_erp_key CHECK ((erp_empresa IS NULL) = (erp_sequencial IS NULL))
 );
 
 -- ---------- Movements ----------
@@ -319,3 +336,11 @@ CREATE INDEX idx_refresh_user       ON refresh_tokens(user_id);
 -- Soft-delete partial indexes (consultas só de registros vivos)
 CREATE INDEX idx_assets_alive       ON assets(id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_alive        ON users(id)  WHERE deleted_at IS NULL;
+
+-- Chave de origem no ERP: única entre registros importados e vivos
+CREATE UNIQUE INDEX uq_assets_erp     ON assets (erp_empresa, erp_sequencial)
+  WHERE erp_empresa IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_categories_erp ON categories (erp_empresa, erp_codigo)
+  WHERE erp_empresa IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_sectors_erp    ON sectors (erp_empresa, erp_codigo)
+  WHERE erp_empresa IS NOT NULL AND deleted_at IS NULL;

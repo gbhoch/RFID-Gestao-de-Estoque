@@ -23,6 +23,9 @@ async function run() {
   for (const m of MODULES)
     for (const a of ACTIONS)
       perms.push(permRepo.create({ code: `${m}:${a}`, module: m, description: `${a} ${m}` }));
+  // Importação do ERP Oracle (POST /erp/import): só admin. Bancos já
+  // existentes recebem via database/migrations/2026-10-08_erp_import_permission.sql.
+  perms.push(permRepo.create({ code: 'erp:import', module: 'erp', description: 'import erp' }));
   await permRepo.save(perms);
 
   // Roles

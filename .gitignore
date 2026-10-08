@@ -5,6 +5,7 @@ node_modules/
 # Variáveis de ambiente (contêm senhas)
 .env
 **/.env
+secrets.env
 
 # Build / saída
 dist/

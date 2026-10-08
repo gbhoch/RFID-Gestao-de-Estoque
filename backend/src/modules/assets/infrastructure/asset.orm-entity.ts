@@ -27,7 +27,11 @@ export class AssetOrmEntity {
     default: 'available',
   })
   status: string;
-  @Column({ name: 'erp_asset_id', nullable: true }) erpAssetId: string;
+  // Origem no ERP (patbem: EMPRESA + SEQUENCIAL). bigint chega do pg como string.
+  @Column({ name: 'erp_empresa', type: 'int', nullable: true }) erpEmpresa: number | null;
+  @Column({ name: 'erp_sequencial', type: 'bigint', nullable: true }) erpSequencial: string | null;
+  @Column({ name: 'erp_synced_at', type: 'timestamptz', nullable: true }) erpSyncedAt: Date | null;
+  @Column({ name: 'erp_hash', type: 'varchar', length: 64, nullable: true }) erpHash: string | null;
   @Column({ type: 'text', nullable: true }) notes: string;
 
   @CreateDateColumn({ name: 'created_at' }) createdAt: Date;

@@ -12,24 +12,20 @@ import { AuthService } from '../../core/auth/auth.service';
       <!-- Painel de marca -->
       <aside class="brand-panel">
         <div class="brand-mark">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-            <path d="M4 8c4.5-3 11.5-3 16 0M6.5 11.5c3-2 8-2 11 0M9 15c1.5-1 4.5-1 6 0"
-              stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-            <circle cx="12" cy="18.5" r="1.4" fill="currentColor"/>
-          </svg>
-          <span>RFID Patrimônio</span>
+          <img src="/assets/logo.png" alt="Mega Goglio" />
         </div>
 
         <div class="brand-copy">
-          <h1>Controle de ativos<br>com precisão de etiqueta.</h1>
-          <p>Rastreie, inventarie e audite cada patrimônio da planta em tempo real.</p>
+          <h1>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 8c4.5-3 11.5-3 16 0M6.5 11.5c3-2 8-2 11 0M9 15c1.5-1 4.5-1 6 0"
+                stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="18.5" r="1.4" fill="currentColor"/>
+            </svg>
+            <span>Controle de ativos RFID</span>
+          </h1>
         </div>
 
-        <ul class="brand-points">
-          <li>Inventário por leitura RFID</li>
-          <li>Histórico completo de movimentações</li>
-          <li>Auditoria de cada operação</li>
-        </ul>
       </aside>
 
       <!-- Formulário -->
@@ -43,7 +39,7 @@ import { AuthService } from '../../core/auth/auth.service';
           <label class="field">
             <span>Login</span>
             <input type="text" [(ngModel)]="login" autocomplete="username"
-              placeholder="seu.usuário" (keyup.enter)="submit()" />
+              placeholder="Usuário" (keyup.enter)="submit()" />
           </label>
 
           <label class="field">
@@ -101,22 +97,39 @@ import { AuthService } from '../../core/auth/auth.service';
       pointer-events: none;
     }
     .brand-mark {
-      display: flex; align-items: center; gap: 12px;
-      font-weight: 650; font-size: 17px; letter-spacing: -.01em;
-      color: var(--brand-300);
+      display: flex; align-items: center;
       z-index: 1;
     }
-    .brand-copy { z-index: 1; }
+    .brand-mark img {
+      height: 26px;
+      width: auto;
+      max-width: 100%;
+      display: block;
+    }
+    .brand-copy {
+      z-index: 1;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
     .brand-copy h1 {
+      width: fit-content;
+      margin-inline: auto;
+      display: flex;
+      align-items: center;
+      gap: 14px;
       color: #ffffff;
       font-size: 34px;
       line-height: 1.18;
       letter-spacing: -.025em;
       font-weight: 680;
     }
+    .brand-copy h1 svg { flex: none; }
     .brand-copy p {
       margin-top: 16px;
       max-width: 30ch;
+      margin-inline: auto;
       color: rgba(234,250,247,.72);
       font-size: 15px;
       line-height: 1.55;

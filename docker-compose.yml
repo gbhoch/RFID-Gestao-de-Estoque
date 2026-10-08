@@ -29,6 +29,12 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh}
       JWT_ACCESS_TTL: 900s
       JWT_REFRESH_TTL: 7d
+      # ERP Oracle (somente leitura) — valores no .env da raiz, nunca aqui
+      ERP_ORACLE_HOST: ${ERP_ORACLE_HOST:-}
+      ERP_ORACLE_PORT: ${ERP_ORACLE_PORT:-1521}
+      ERP_ORACLE_SERVICE: ${ERP_ORACLE_SERVICE:-}
+      ERP_ORACLE_USER: ${ERP_ORACLE_USER:-}
+      ERP_ORACLE_PASSWORD: ${ERP_ORACLE_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

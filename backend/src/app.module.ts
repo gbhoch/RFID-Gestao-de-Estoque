@@ -14,6 +14,7 @@ import { MovementsModule } from './modules/movements/movements.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ErpModule } from './modules/erp/erp.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     InventoryModule,
     AuditModule,
     DashboardModule,
+    ErpModule, // conexão (test-connection) e importação do ERP Oracle
     // Pendentes (mesmo molde): ReportsModule (PDF/Excel via export),
     // IntegrationModule (adapter ERP + integration_logs).
   ],

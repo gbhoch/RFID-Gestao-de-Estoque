@@ -16,12 +16,19 @@
             "index": "src/index.html",
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
-            "assets": [],
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "src/assets",
+                "output": "assets"
+              }
+            ],
             "styles": [
               "node_modules/devextreme/dist/css/dx.material.teal.light.css",
               "src/styles.css"
             ],
-            "scripts": []
+            "scripts": [],
+            "outputHashing": "all"
           }
         },
         "serve": {
