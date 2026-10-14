@@ -41,7 +41,8 @@ import { PageHeaderComponent } from '../../shared/page-header.component';
         <dxi-column dataField="managerId" caption="Responsável" [visible]="false">
           <dxo-lookup [dataSource]="users" valueExpr="id" displayExpr="name"></dxo-lookup>
         </dxi-column>
-        <dxi-column dataField="location" caption="Localização"></dxi-column>
+        <!-- Fora do grid, mantida no formulário de edição -->
+        <dxi-column dataField="location" caption="Localização" [visible]="false"></dxi-column>
         <dxi-column dataField="status" caption="Status" cellTemplate="statusCell" [width]="130">
           <dxo-lookup [dataSource]="statuses" valueExpr="value" displayExpr="text"></dxo-lookup>
         </dxi-column>

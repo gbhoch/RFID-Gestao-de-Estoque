@@ -4,23 +4,52 @@ import CustomStore from 'devextreme/data/custom_store';
 import { firstValueFrom, Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
+export interface RestStoreOptions {
+  /**
+   * Filtros extras enviados a cada carga, lidos no momento da chamada (valores
+   * vazios são omitidos). Ex.: () => ({ sectorId: 'none', status: 'active' }).
+   */
+  params?: () => Record<string, string | null | undefined>;
+  /** Chamado após cada carga com o total do backend (para "N registros"). */
+  onLoaded?: (total: number) => void;
+  /**
+   * Repassa a ordenação do grid como sortBy/sortDir (1ª coluna ordenada).
+   * Use junto com remoteOperations { paging: true, sorting: true }: com
+   * ordenação local o DevExtreme desliga a paginação remota e passa a carregar
+   * sem skip/take (o grid ficaria preso no take padrão).
+   */
+  remoteSort?: boolean;
+}
+
+type SortOption = { selector: string; desc?: boolean };
+
 @Injectable({ providedIn: 'root' })
 export class RestStoreFactory {
   private http = inject(HttpClient);
 
-  create(resource: string): CustomStore {
+  create(resource: string, options: RestStoreOptions = {}): CustomStore {
     const base = `${environment.apiUrl}/${resource}`;
     return new CustomStore({
       key: 'id',
       load: async (opts) => {
+        const params: Record<string, string | number> = {
+          skip: opts.skip ?? 0, take: opts.take ?? 20,
+        };
+        for (const [k, v] of Object.entries(options.params?.() ?? {}))
+          if (v !== null && v !== undefined && v !== '') params[k] = v;
+        if (options.remoteSort) {
+          const sort = (Array.isArray(opts.sort) ? opts.sort[0] : opts.sort) as SortOption | undefined;
+          if (sort?.selector) {
+            params['sortBy'] = sort.selector;
+            params['sortDir'] = sort.desc ? 'desc' : 'asc';
+          }
+        }
         try {
-          const res: any = await firstValueFrom(
-            this.http.get(base, {
-              params: { skip: opts.skip ?? 0, take: opts.take ?? 20 } as any,
-            }),
-          );
+          const res: any = await firstValueFrom(this.http.get(base, { params }));
           // Backend devolve { data, total }. Garante array mesmo se vier vazio.
-          return { data: res?.data ?? [], totalCount: res?.total ?? 0 };
+          const totalCount = res?.total ?? 0;
+          options.onLoaded?.(totalCount);
+          return { data: res?.data ?? [], totalCount };
         } catch (e) {
           // Em vez de travar em "Loading...", devolve vazio e propaga o erro.
           console.error(`Falha ao carregar ${resource}:`, e);

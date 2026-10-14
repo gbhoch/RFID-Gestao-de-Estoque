@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
-import { Asset, AssetRepositoryPort, AssetStatus } from '../domain/asset';
+import { Repository, ILike, IsNull, Not, FindOptionsWhere } from 'typeorm';
+import {
+  Asset, AssetRepositoryPort, AssetStatusFilter, ACTIVE_STATUS_GROUP, NO_SECTOR,
+  AssetSortField, SortDirection,
+} from '../domain/asset';
 import { AssetOrmEntity } from './asset.orm-entity';
 
 @Injectable()
@@ -46,18 +49,30 @@ export class AssetRepository implements AssetRepositoryPort {
 
   async list(params: {
     skip: number; take: number; sectorId?: string;
-    status?: AssetStatus; search?: string;
+    status?: AssetStatusFilter; search?: string;
+    sortBy: AssetSortField; sortDir: SortDirection;
   }) {
-    const where: any = {};
-    if (params.sectorId) where.sectorId = params.sectorId;
-    if (params.status) where.status = params.status;
-    if (params.search) where.name = ILike(`%${params.search}%`);
+    const base: FindOptionsWhere<AssetOrmEntity> = {};
+    if (params.sectorId === NO_SECTOR) base.sectorId = IsNull();
+    else if (params.sectorId) base.sectorId = params.sectorId;
+    if (params.status === ACTIVE_STATUS_GROUP) base.status = Not('written_off');
+    else if (params.status) base.status = params.status;
 
+    // Busca em nome OU código: array de where = OR (cada ramo repete os filtros).
+    // Escapa os curingas do LIKE para o texto digitado ser literal.
+    const term = params.search?.trim();
+    const like = term ? ILike(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`) : undefined;
+    const where = like ? [{ ...base, name: like }, { ...base, assetCode: like }] : base;
+
+    // find* aplica o soft delete (deleted_at IS NULL) automaticamente.
+    // findAndCount: o total é um COUNT com os mesmos filtros, sem skip/take.
+    // O id desempata (status/nome repetem) para a paginação não pular nem
+    // repetir linhas entre páginas.
     const [rows, total] = await this.repo.findAndCount({
       where,
       skip: params.skip,
       take: params.take,
-      order: { createdAt: 'DESC' },
+      order: { [params.sortBy]: params.sortDir, id: 'ASC' },
     });
     return { data: rows.map((r) => this.toDomain(r)), total };
   }

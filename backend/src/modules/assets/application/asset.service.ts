@@ -1,6 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   Asset, AssetRepositoryPort, ASSET_REPOSITORY,
+  ASSET_SORT_FIELDS, AssetSortField, DEFAULT_ASSET_SORT,
 } from '../domain/asset';
 import { CreateAssetDto, UpdateAssetDto, ListAssetQuery } from './dtos/asset.dto';
 
@@ -38,6 +39,11 @@ export class AssetService {
       sectorId: q.sectorId,
       status: q.status,
       search: q.search,
+      // Lista fechada: campo/direção desconhecidos → padrão (assetCode ASC).
+      sortBy: (ASSET_SORT_FIELDS as readonly string[]).includes(q.sortBy ?? '')
+        ? (q.sortBy as AssetSortField)
+        : DEFAULT_ASSET_SORT.field,
+      sortDir: q.sortDir?.toLowerCase() === 'desc' ? 'DESC' : DEFAULT_ASSET_SORT.dir,
     });
   }
 
