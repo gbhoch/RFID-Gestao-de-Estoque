@@ -22,7 +22,7 @@ export const routes: Routes = [
       { path: 'sectors', loadComponent: () => import('./features/sectors/sectors.component').then((m) => m.SectorsComponent) },
       { path: 'categories', loadComponent: () => import('./features/categories/categories.component').then((m) => m.CategoriesComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then((m) => m.UsersComponent) },
-      // POC do leitor TSL via Capacitor — só admin, sem link no menu.
+      // POC do leitor TSL via Capacitor — só admin; link no menu só dentro do app (ShellComponent).
       { path: 'leitor-poc', canActivate: [adminGuard], loadComponent: () => import('./features/reader-poc/reader-poc.component').then((m) => m.ReaderPocComponent) },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],

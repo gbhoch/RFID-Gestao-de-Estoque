@@ -1,5 +1,6 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { Capacitor } from '@capacitor/core';
 import { AuthService } from './core/auth/auth.service';
 import { ThemeService } from './core/theme.service';
 
@@ -27,7 +28,7 @@ interface NavItem {
         </div>
 
         <nav>
-          @for (group of nav; track group.section) {
+          @for (group of visibleNav(); track group.section) {
             <div class="nav-section">
               <span class="nav-label">{{ group.section }}</span>
               @for (item of group.items; track item.label) {
@@ -237,6 +238,26 @@ export class ShellComponent {
       ] as NavItem[],
     },
   ];
+
+  // TEMPORÁRIO: link da POC do leitor (rota /leitor-poc), só admin e só dentro do app
+  // Capacitor — no navegador comum o plugin nativo não existe.
+  private readonly isNative = Capacitor.isNativePlatform();
+  private readonly readerPocSection = {
+    section: 'Testes',
+    items: [
+      { label: 'Leitor (POC)', route: '/leitor-poc', icon: 'M4 8c4.5-3 11.5-3 16 0M6.5 11.5c3-2 8-2 11 0M9 15c1.5-1 4.5-1 6 0M12 18.5h.01' },
+    ] as NavItem[],
+  };
+  readonly visibleNav = computed(() =>
+    this.isNative && this.auth.user()?.role === 'admin' ? [...this.nav, this.readerPocSection] : this.nav);
+
+  constructor() {
+    // Depois de um reload o AuthService só tem os tokens; sem o perfil o papel é
+    // desconhecido e o link não apareceria até alguém chamar /auth/me.
+    if (this.isNative && this.auth.isAuthenticated() && !this.auth.user()) {
+      this.auth.loadProfile().subscribe({ error: () => {} });
+    }
+  }
 
   initials() {
     const l = this.auth.user()?.login ?? 'U';

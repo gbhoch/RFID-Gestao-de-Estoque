@@ -18,6 +18,10 @@ import com.uk.tsl.rfid.asciiprotocol.AsciiCommander
 import com.uk.tsl.rfid.asciiprotocol.device.ConnectionState
 import com.uk.tsl.rfid.asciiprotocol.device.ReaderManager
 import com.uk.tsl.rfid.asciiprotocol.responders.LoggerResponder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 
 /**
  * Plugin Capacitor que expõe o leitor TSL (Bluetooth Classic) ao sistema web.
@@ -25,7 +29,11 @@ import com.uk.tsl.rfid.asciiprotocol.responders.LoggerResponder
  * Contrato TypeScript em frontend/src/app/features/reader-poc/rfid-reader.plugin.ts.
  *
  * Eventos:
- * - `tagRead`           { epc, rssi? } — uma vez por leitura física (sem deduplicar);
+ * - `tagsRead`          { tags: [{ epc, rssi?, count }] } — lote deduplicado por EPC a cada
+ *                       intervalo ([setBatchInterval], padrão 200 ms);
+ * - `tagRead`           { epc, rssi? } — uma vez por leitura física (sem deduplicar).
+ *                       Mantido por compatibilidade; só é emitido se houver listener;
+ * - `triggerChanged`    { pressed } — gatilho físico apertado/solto;
  * - `connectionChanged` mesmo formato de [getStatus].
  */
 @CapacitorPlugin(
@@ -41,6 +49,10 @@ class RfidReaderPlugin : Plugin() {
 
     private lateinit var connection: ReaderConnectionManager
     private lateinit var inventory: InventoryController
+    private lateinit var trigger: TriggerMonitor
+    private lateinit var batcher: TagBatcher
+
+    private val batchScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
      * Os métodos do plugin rodam numa thread própria da bridge; o SDK da TSL foi escrito
@@ -53,17 +65,26 @@ class RfidReaderPlugin : Plugin() {
         val commander = AsciiCommander.sharedInstance()
 
         connection = ReaderConnectionManager { state -> onReaderStateChanged(state) }
+        batcher = TagBatcher(batchScope) { batch -> notifyListeners("tagsRead", batchJson(batch)) }
         inventory = InventoryController(
             commander = commander,
             onTagRead = { tag ->
-                notifyListeners("tagRead", JSObject().apply {
-                    put("epc", tag.epc)
-                    tag.rssi?.let { put("rssi", it) }
-                })
+                batcher.add(tag)
+                // Um evento por leitura física é caro na bridge: só para quem ainda ouve.
+                if (hasListeners("tagRead")) {
+                    notifyListeners("tagRead", JSObject().apply {
+                        put("epc", tag.epc)
+                        tag.rssi?.let { put("rssi", it) }
+                    })
+                }
             },
             onScanningChanged = { notifyListeners("connectionChanged", statusJson()) },
         )
+        trigger = TriggerMonitor(commander) { pressed ->
+            notifyListeners("triggerChanged", JSObject().put("pressed", pressed))
+        }
         connection.registerObservers()
+        trigger.attach()
         inventory.attach()
     }
 
@@ -79,7 +100,9 @@ class RfidReaderPlugin : Plugin() {
 
     override fun handleOnDestroy() {
         inventory.detach()
+        trigger.detach()
         connection.unregisterObservers()
+        batchScope.cancel()
     }
 
     // ---------------------------------------------------------------- métodos
@@ -157,6 +180,61 @@ class RfidReaderPlugin : Plugin() {
         call.resolve(statusJson())
     }
 
+    /**
+     * Filtro inclusivo por prefixos de EPC: { prefixes: string[] }. Substitui o filtro
+     * anterior. Quem guarda a lista é o lado web; aqui só se aplica o que chegou.
+     */
+    @PluginMethod
+    fun applyEpcFilter(call: PluginCall) {
+        val raw = call.getArray("prefixes")
+        if (raw == null) {
+            call.reject("Informe prefixes: string[].", "INVALID_ARGUMENT")
+            return
+        }
+        val filter = try {
+            EpcPrefixFilter.of(raw.toList<Any?>().map { it?.toString().orEmpty() })
+        } catch (e: Exception) {
+            // IllegalArgumentException do of() ou JSONException de item que não é string.
+            call.reject(e.message ?: "Prefixos inválidos.", "INVALID_ARGUMENT")
+            return
+        }
+        onMain(call) {
+            if (!connection.state.isConnected) {
+                call.reject("Leitor desconectado.", "NOT_CONNECTED")
+                return@onMain
+            }
+            inventory.applyEpcFilter(filter)
+            notifyListeners("connectionChanged", statusJson())
+            call.resolve(filterJson(filter))
+        }
+    }
+
+    @PluginMethod
+    fun clearEpcFilter(call: PluginCall) {
+        onMain(call) {
+            inventory.clearEpcFilter()
+            notifyListeners("connectionChanged", statusJson())
+            call.resolve()
+        }
+    }
+
+    /** Intervalo do evento tagsRead: { intervalMs } entre 50 e 5000. */
+    @PluginMethod
+    fun setBatchInterval(call: PluginCall) {
+        val intervalMs = call.getInt("intervalMs")
+        if (intervalMs == null) {
+            call.reject("Informe intervalMs.", "INVALID_ARGUMENT")
+            return
+        }
+        try {
+            batcher.intervalMs = intervalMs.toLong()
+        } catch (e: IllegalArgumentException) {
+            call.reject(e.message, "INVALID_ARGUMENT")
+            return
+        }
+        call.resolve(JSObject().put("intervalMs", batcher.intervalMs))
+    }
+
     // ------------------------------------------------------------- permissões
 
     /**
@@ -193,11 +271,37 @@ class RfidReaderPlugin : Plugin() {
     private fun onReaderStateChanged(state: ReaderState) {
         when (state.connectionState) {
             // A configuração não sobrevive a uma reconexão: reenviar sempre que conectar.
-            ConnectionState.CONNECTED -> inventory.applyConfiguration()
-            ConnectionState.DISCONNECTED, ConnectionState.LOST -> inventory.onReaderDisconnected()
+            // O filtro EPC vai junto: os campos de Select moram no InventoryCommand.
+            ConnectionState.CONNECTED -> {
+                inventory.applyConfiguration()
+                trigger.enableReporting()
+            }
+            ConnectionState.DISCONNECTED, ConnectionState.LOST -> {
+                inventory.onReaderDisconnected()
+                trigger.onReaderDisconnected()
+                batcher.flush()
+            }
             else -> Unit
         }
         notifyListeners("connectionChanged", statusJson())
+    }
+
+    private fun batchJson(batch: List<TagBatchEntry>): JSObject {
+        val tags = JSArray()
+        batch.forEach { tag ->
+            tags.put(JSObject().apply {
+                put("epc", tag.epc)
+                tag.rssi?.let { put("rssi", it) }
+                put("count", tag.count)
+            })
+        }
+        return JSObject().put("tags", tags)
+    }
+
+    private fun filterJson(filter: EpcPrefixFilter?): JSObject = JSObject().apply {
+        put("prefixes", JSArray(filter?.prefixes.orEmpty()))
+        // Trecho aplicado no leitor (Gen2 Select); o restante é conferido no app.
+        filter?.hardwareSpec?.let { put("hardwarePrefix", it.valueHex) }
     }
 
     private fun statusJson(): JSObject {
@@ -206,6 +310,9 @@ class RfidReaderPlugin : Plugin() {
             put("state", state.connectionState.name.lowercase())
             put("connected", state.isConnected)
             put("scanning", inventory.isScanning)
+            put("triggerPressed", trigger.isPressed)
+            put("epcFilter", filterJson(inventory.activeFilter))
+            put("batchIntervalMs", batcher.intervalMs)
             put("bluetoothPermission", hasBluetoothPermission())
             state.readerName?.let { put("readerName", it) }
             state.serialNumber?.let { put("serialNumber", it) }
