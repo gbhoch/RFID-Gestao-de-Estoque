@@ -4,3 +4,6 @@ dist
 .git
 Dockerfile
 .dockerignore
+android
+capacitor-www
+capacitor.local.json

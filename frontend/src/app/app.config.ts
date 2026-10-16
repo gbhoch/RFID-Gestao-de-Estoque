@@ -3,6 +3,7 @@ import { provideRouter, Routes } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { authInterceptor, authGuard } from './core/interceptors/auth.interceptor';
+import { adminGuard } from './features/reader-poc/admin.guard';
 
 export const routes: Routes = [
   { path: 'login', loadComponent: () => import('./features/auth/login.component').then((m) => m.LoginComponent) },
@@ -21,6 +22,8 @@ export const routes: Routes = [
       { path: 'sectors', loadComponent: () => import('./features/sectors/sectors.component').then((m) => m.SectorsComponent) },
       { path: 'categories', loadComponent: () => import('./features/categories/categories.component').then((m) => m.CategoriesComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then((m) => m.UsersComponent) },
+      // POC do leitor TSL via Capacitor — só admin, sem link no menu.
+      { path: 'leitor-poc', canActivate: [adminGuard], loadComponent: () => import('./features/reader-poc/reader-poc.component').then((m) => m.ReaderPocComponent) },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },
