@@ -1,7 +1,7 @@
 import { Component, NgZone, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { PageHeaderComponent } from '../../shared/page-header.component';
-import { RfidReader, type ReaderDevice, type ReaderStatus, type TagsReadEvent } from './rfid-reader.plugin';
+import { RfidReader, type ReaderDevice, type ReaderStatus, type TagsReadEvent } from '../../core/rfid/rfid-reader.plugin';
 
 interface TagRow {
   epc: string;

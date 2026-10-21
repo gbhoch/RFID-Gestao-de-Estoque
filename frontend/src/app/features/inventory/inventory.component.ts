@@ -7,11 +7,12 @@ import notify from 'devextreme/ui/notify';
 import { RestStoreFactory } from '../../shared/rest-store.factory';
 import { InventoryApi } from './inventory.api';
 import { InventoryActiveComponent } from './inventory-active.component';
+import { ReadSyncStatusComponent } from './read-sync-status.component';
 
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, FormsModule, DxDataGridModule, InventoryActiveComponent],
+  imports: [CommonModule, FormsModule, DxDataGridModule, InventoryActiveComponent, ReadSyncStatusComponent],
   template: `
     <h1 class="page-title">Inventário</h1>
     <p class="page-sub">Levantamento por leitura de etiquetas — coleta agora, conciliação ao finalizar.</p>
@@ -21,7 +22,14 @@ import { InventoryActiveComponent } from './inventory-active.component';
     } @else if (current(); as inv) {
       <app-inventory-active [inventory]="inv"
         (finished)="onFinished($event)"></app-inventory-active>
+    } @else if (error()) {
+      <div class="card muted-card">{{ error() }}
+        <button class="primary retry" (click)="load()">Tentar novamente</button></div>
+      <app-read-sync-status></app-read-sync-status>
     } @else {
+      <!-- Pendências de inventários anteriores (ex.: sessão que expirou com fila). -->
+      <app-read-sync-status></app-read-sync-status>
+
       <!-- Estado 1: nenhum inventário aberto -->
       <div class="card start">
         <div class="step-badge">+</div>
@@ -68,7 +76,6 @@ import { InventoryActiveComponent } from './inventory-active.component';
           </div>
         </dx-data-grid>
       </div>
-      @if (error()) { <p class="err">{{ error() }}</p> }
     }
   `,
   styles: [`
@@ -99,7 +106,7 @@ import { InventoryActiveComponent } from './inventory-active.component';
     button:disabled { opacity: .5; cursor: default; }
 
     .pend { color: var(--danger); font-weight: 700; }
-    .err { color: var(--danger); font-size: 13px; }
+    .retry { margin-left: 12px; }
   `],
 })
 export class InventoryComponent {

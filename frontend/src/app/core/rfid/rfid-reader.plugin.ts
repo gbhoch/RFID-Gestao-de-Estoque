@@ -3,6 +3,7 @@ import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 /**
  * Contrato do plugin nativo "RfidReader" (leitor TSL via Bluetooth Classic).
  * Implementação: frontend/android/app/src/main/java/com/megagoglio/rfidgestao/rfidreader/RfidReaderPlugin.kt
+ * Usado pela tela de Inventário (RfidReaderService) e pela página de teste /leitor-poc.
  *
  * Só existe dentro do app Android (Capacitor). No navegador comum não há
  * implementação web: qualquer chamada rejeita com "not implemented".
@@ -85,6 +86,8 @@ export interface RfidReaderPlugin {
   clearEpcFilter(): Promise<void>;
   /** Intervalo do evento tagsRead, 50–5000 ms (padrão 200). */
   setBatchInterval(options: { intervalMs: number }): Promise<{ intervalMs: number }>;
+  /** ANDROID_ID do aparelho — enviado como deviceId nas leituras do inventário. */
+  getDeviceId(): Promise<{ deviceId: string }>;
 
   /** Lote de leituras deduplicado por EPC, a cada batchIntervalMs (só quando houve leitura). */
   addListener(eventName: 'tagsRead', listener: (event: TagsReadEvent) => void): Promise<PluginListenerHandle>;

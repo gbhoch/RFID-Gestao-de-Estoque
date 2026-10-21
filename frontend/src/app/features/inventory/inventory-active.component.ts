@@ -4,19 +4,26 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 import { DxDataGridModule, DxSelectBoxModule } from 'devextreme-angular';
 import notify from 'devextreme/ui/notify';
-import { confirm } from 'devextreme/ui/dialog';
-import { environment } from '../../../environments/environment';
+import { alert, confirm } from 'devextreme/ui/dialog';
+import { Subscription } from 'rxjs';
+import type { TagBatchItem } from '../../core/rfid/rfid-reader.plugin';
 import { InventoryApi } from './inventory.api';
+import { ReadSyncQueue, type QueuedRead, type ReadBatch } from './read-sync-queue.service';
+import { ReadSyncStatusComponent } from './read-sync-status.component';
+import { ReaderPanelComponent } from './reader/reader-panel.component';
+import { RfidReaderService } from './reader/rfid-reader.service';
 import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
+
+type CaptureMeta = Omit<QueuedRead, 'epc' | 'readAt'>;
+const EMPTY_PANEL = { expected: [] as any[], read: [] as any[] };
 
 @Component({
   selector: 'app-inventory-active',
   standalone: true,
-  imports: [CommonModule, FormsModule, DxDataGridModule, DxSelectBoxModule, ReaderCaptureDirective],
+  imports: [CommonModule, FormsModule, DxDataGridModule, DxSelectBoxModule, ReaderCaptureDirective,
+    ReadSyncStatusComponent, ReaderPanelComponent],
   template: `
     <!-- Cabeçalho fixo -->
     <div class="card head">
@@ -45,6 +52,8 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
         <button class="btn success" [disabled]="busy()" (click)="finish()">Finalizar inventário</button>
       </div>
     </div>
+
+    <app-read-sync-status [inventoryId]="inventory.id" (discarded)="onDiscarded()"></app-read-sync-status>
 
     <!-- Seletor de setor -->
     <div class="card sector-pick">
@@ -75,6 +84,12 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
       }
     </div>
 
+    <!-- Leitor TSL via Bluetooth: só dentro do app Android (Capacitor). -->
+    @if (isNative) {
+      <app-reader-panel [inventoryId]="inventory.id" [canCapture]="canCapture()"
+        [uniqueCount]="readRows().length" (tags)="onReaderTags($event)"></app-reader-panel>
+    }
+
     @if (selectedVisit(); as visit) {
       <!-- Captura de leituras: leitor HID em modo teclado. Cada tag lida é
            registrada automaticamente (1× por etiqueta). Enter/botão = manual. -->
@@ -90,8 +105,8 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
       <div class="tables">
         <div class="card tbl">
           <div class="tbl-title">Esperados neste setor
-            <span class="tbl-sub">{{ panel().expected.length }} ativos</span></div>
-          <dx-data-grid [dataSource]="panel().expected" [showBorders]="false" [rowAlternationEnabled]="true"
+            <span class="tbl-sub">{{ expectedRows().length }} ativos</span></div>
+          <dx-data-grid [dataSource]="expectedRows()" [showBorders]="false" [rowAlternationEnabled]="true"
             [columnAutoWidth]="true" noDataText="Nenhum ativo cadastrado neste setor." height="360">
             <dxo-paging [pageSize]="10"></dxo-paging>
             <dxo-search-panel [visible]="true" [width]="200" placeholder="Buscar…"></dxo-search-panel>
@@ -102,6 +117,7 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
             <div *dxTemplate="let c of 'sitCell'">
               @switch (c.data.situation) {
                 @case ('read_here') { <span class="tag ok">✓ Lido aqui</span> }
+                @case ('pending_here') { <span class="tag info">⏳ Lido aqui (enviando)</span> }
                 @case ('read_elsewhere') { <span class="tag info">ⓘ Lido em {{ sectorName(c.data.otherSectorId) }}</span> }
                 @default { <span class="tag none">— não lido</span> }
               }
@@ -111,8 +127,8 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
 
         <div class="card tbl">
           <div class="tbl-title">Lidas neste setor
-            <span class="tbl-sub">{{ panel().read.length }} EPCs</span></div>
-          <dx-data-grid [dataSource]="panel().read" [showBorders]="false" [rowAlternationEnabled]="true"
+            <span class="tbl-sub">{{ readRows().length }} EPCs</span></div>
+          <dx-data-grid [dataSource]="readRows()" [showBorders]="false" [rowAlternationEnabled]="true"
             [columnAutoWidth]="true" noDataText="Nenhuma leitura neste setor." height="360">
             <dxo-paging [pageSize]="10"></dxo-paging>
             <dxi-column dataField="epc" caption="EPC"></dxi-column>
@@ -124,6 +140,8 @@ import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
             <div *dxTemplate="let c of 'flagCell'">
               @switch (c.data.flag) {
                 @case ('ok') { <span class="tag ok">✓ Neste setor</span> }
+                @case ('pending') { <span class="tag none">⏳ Aguardando envio</span> }
+                @case ('sent') { <span class="tag none">Enviada — atualizando…</span> }
                 @case ('other_sector') { <span class="tag amber">⚑ {{ sectorName(c.data.ownerSectorId) }}</span> }
                 @default { <span class="tag danger">⚑ Tag desconhecida</span> }
               }
@@ -200,13 +218,17 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   @Output() finished = new EventEmitter<string>();
 
   private api = inject(InventoryApi);
-  private http = inject(HttpClient);
+  private queue = inject(ReadSyncQueue);
+  private reader = inject(RfidReaderService);
   @ViewChild('epcBox') epcBox?: ElementRef<HTMLInputElement>;
+
+  /** Painel do leitor TSL: só dentro do app Capacitor. */
+  readonly isNative = this.reader.isNative;
 
   detail = signal<any>(null);
   sectors = signal<{ id: string; name: string }[]>([]);
   selectedVisit = signal<any>(null);
-  panel = signal<{ expected: any[]; read: any[] }>({ expected: [], read: [] });
+  panel = signal<{ expected: any[]; read: any[] }>(EMPTY_PANEL);
   busy = signal(false);
   now = signal(Date.now());
 
@@ -215,10 +237,15 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   private sectorMap = new Map<string, string>();
   private timer: any;
 
-  // Auto-registro do leitor: dedup por etiqueta na visita + envio em lote.
-  private capturedEpcs = new Set<string>();
-  private pendingReads: string[] = [];
-  private flushTimer: any = null;
+  /** Dedup por etiqueta, POR VISITA (trocar de setor no meio de um envio não mistura). */
+  private captured = new Map<string, Set<string>>();
+  /** Visita a que o painel atual pertence (sem rede, mantém o último painel dela). */
+  private panelVisitId: string | null = null;
+  /** Lotes já aceitos pelo servidor que o painel ainda não refletiu (evita a linha "piscar"). */
+  private sentAwaitingPanel = signal<Map<string, { visitId: string; read: QueuedRead }>>(new Map());
+  private sentSub?: Subscription;
+  private refreshTimer: any = null;
+  private lastRefreshAt = 0;
 
   status = computed(() => this.detail()?.status ?? this.inventory?.status);
   completedCount = computed(() => (this.detail()?.visits ?? []).filter((v: any) => v.status === 'completed').length);
@@ -233,26 +260,61 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   canCapture = computed(() =>
     this.status() === 'in_progress' && this.selectedVisit()?.status === 'in_progress');
 
+  /** "Lidas neste setor": painel do servidor + o que ainda está na fila (ou acabou de subir). */
+  readRows = computed(() => {
+    const p = this.panel();
+    const v = this.selectedVisit();
+    if (!v) return p.read;
+    const known = new Set(p.read.map((r: any) => String(r.epc).toUpperCase()));
+    const extra: any[] = [];
+    const add = (r: QueuedRead, flag: 'pending' | 'sent') => {
+      if (known.has(r.epc)) return;
+      known.add(r.epc);
+      extra.push({ epc: r.epc, assetCode: null, count: r.readCount ?? 1, lastReadAt: r.readAt, flag });
+    };
+    for (const r of this.queue.unsentReadsFor(this.inventory.id, v.id).values()) add(r, 'pending');
+    for (const s of this.sentAwaitingPanel().values()) if (s.visitId === v.id) add(s.read, 'sent');
+    return extra.length ? [...extra, ...p.read] : p.read;
+  });
+  /** "Esperados": marca como lido aqui o que ainda está a caminho do servidor. */
+  expectedRows = computed(() => {
+    const local = new Set(this.readRows().filter((r: any) => r.flag === 'pending' || r.flag === 'sent')
+      .map((r: any) => r.epc));
+    const expected = this.panel().expected;
+    if (!local.size) return expected;
+    return expected.map((a: any) => a.situation !== 'read_here' && a.epc && local.has(String(a.epc).toUpperCase())
+      ? { ...a, situation: 'pending_here' } : a);
+  });
+
   async ngOnInit() {
+    this.sentSub = this.queue.sent$.subscribe((b) => this.onBatchSent(b));
     await Promise.all([this.loadDetail(), this.loadSectors()]);
     this.timer = setInterval(() => this.now.set(Date.now()), 1000);
   }
   ngOnDestroy() {
     if (this.timer) clearInterval(this.timer);
-    if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.sentSub?.unsubscribe();
+    // Sair da tela: o leitor para (ReaderPanelComponent) e o pendente sobe agora; o que
+    // não subir fica na fila persistida e segue tentando.
+    this.queue.flushNow();
   }
 
   sectorName = (id: string | null) => (id ? this.sectorMap.get(id) ?? '—' : '—');
 
   private async loadDetail() {
-    try { this.detail.set(await this.api.detail(this.inventory.id)); }
-    catch { notify('Falha ao carregar o inventário.', 'error', 3000); }
+    try {
+      const d = await this.api.detail(this.inventory.id);
+      this.detail.set(d);
+      // Leitura tardia reabre setor no servidor: manter o status da visita aberta em dia.
+      const sel = this.selectedVisit();
+      const fresh = sel && (d?.visits ?? []).find((v: any) => v.id === sel.id);
+      if (fresh && fresh.status !== sel.status) this.selectedVisit.set({ ...sel, ...fresh });
+    } catch { notify('Falha ao carregar o inventário.', 'error', 3000); }
   }
   private async loadSectors() {
     try {
-      const res: any = await firstValueFrom(
-        this.http.get(`${environment.apiUrl}/sectors`, { params: { skip: 0, take: 500 } as any }),
-      );
+      const res: any = await this.api.sectors();
       const list = (res?.data ?? []).map((s: any) => ({ id: s.id, name: s.name }));
       this.sectors.set(list);
       this.sectorMap = new Map(list.map((s: any) => [s.id, s.name]));
@@ -260,9 +322,19 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   }
   private async loadPanel() {
     const v = this.selectedVisit();
-    if (!v) { this.panel.set({ expected: [], read: [] }); return; }
-    try { this.panel.set(await this.api.panel(this.inventory.id, v.id)); }
-    catch { this.panel.set({ expected: [], read: [] }); }
+    if (!v) { this.panel.set(EMPTY_PANEL); this.panelVisitId = null; return; }
+    if (this.panelVisitId !== v.id) { this.panel.set(EMPTY_PANEL); this.panelVisitId = null; }
+    try {
+      const p = await this.api.panel(this.inventory.id, v.id);
+      if (this.selectedVisit()?.id !== v.id) return; // trocou de setor no meio
+      this.panel.set(p);
+      this.panelVisitId = v.id;
+      const seen = this.capturedFor(v.id);
+      const inPanel = new Set<string>((p.read ?? []).map((r: any) => String(r.epc).toUpperCase()));
+      inPanel.forEach((epc) => seen.add(epc));
+      this.sentAwaitingPanel.update((m) =>
+        new Map([...m].filter(([, s]) => !(s.visitId === v.id && inPanel.has(s.read.epc)))));
+    } catch { /* sem rede e sem painel em memória: a tabela mostra só o que está na fila */ }
   }
 
   onPick(e: any) { if (e.event && e.value) this.selectSector(e.value); }
@@ -274,7 +346,6 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
       await this.loadDetail();
       this.selectedVisit.set(visit);
       await this.loadPanel();
-      this.seedCaptured();
       setTimeout(() => this.epcBox?.nativeElement.focus(), 0);
     } catch (e: any) {
       notify(e?.error?.message || 'Falha ao selecionar setor.', 'error', 3500);
@@ -284,69 +355,133 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   async viewVisit(v: any) {
     this.selectedVisit.set(v);
     await this.loadPanel();
-    this.seedCaptured();
     if (this.canCapture()) setTimeout(() => this.epcBox?.nativeElement.focus(), 0);
   }
 
+  /** Registro manual: sempre registra (mesmo repetido) e tenta enviar na hora. */
   async addRead() {
     const epc = this.epcInput.trim().toUpperCase();
-    if (!epc || !this.canCapture()) return;
+    const visit = this.selectedVisit();
+    if (!epc || !this.canCapture() || !visit) return;
     this.epcInput = '';
-    this.capturedEpcs.add(epc);
-    try {
-      await this.api.addReads(this.inventory.id, this.selectedVisit().id, [epc]);
-      await Promise.all([this.loadPanel(), this.loadDetail()]);
-    } catch (e: any) {
-      this.capturedEpcs.delete(epc);
-      notify(e?.error?.message || 'Falha ao registrar leitura.', 'error', 3000);
-    } finally {
-      this.epcBox?.nativeElement.focus();
-    }
+    this.capturedFor(visit.id).add(epc);
+    this.queue.enqueue(this.inventory.id, visit.id, [{ epc, readAt: new Date().toISOString() }]);
+    this.epcBox?.nativeElement.focus();
+    await this.queue.flushNow();
+  }
+
+  /** Chamado pela ReaderCaptureDirective a cada etiqueta lida (leitor HID em modo teclado). */
+  onReaderEpc(epc: string) {
+    this.epcInput = ''; // limpa o resíduo que o leitor digitou no campo
+    this.capture([{ epc }]);
+  }
+
+  /** Lote do leitor TSL (plugin Capacitor, evento tagsRead). */
+  onReaderTags(tags: TagBatchItem[]) {
+    const deviceId = this.reader.deviceId();
+    this.capture(tags.map((t) => ({
+      epc: t.epc,
+      meta: {
+        ...(typeof t.rssi === 'number' ? { rssi: Math.round(t.rssi) } : {}),
+        ...(t.count >= 1 ? { readCount: t.count } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      },
+    })));
   }
 
   /**
-   * Chamado pela ReaderCaptureDirective a cada etiqueta lida (leitor HID).
-   * Registra automaticamente cada tag distinta uma vez por visita (dedup) e
-   * envia em lote para não sobrecarregar o backend no modo contínuo.
+   * Caminho único das leituras (teclado/HID e leitor): cada tag distinta entra uma vez
+   * por visita e vai para a fila persistida, que envia em lote com nova tentativa.
    */
-  onReaderEpc(epc: string) {
-    if (!this.canCapture()) return;
-    const norm = epc.toUpperCase();
-    if (this.capturedEpcs.has(norm)) return; // já lida nesta visita (1× por tag)
-    this.capturedEpcs.add(norm);
-    this.pendingReads.push(norm);
-    this.epcInput = ''; // limpa o resíduo que o leitor digitou no campo
-    if (this.flushTimer) clearTimeout(this.flushTimer);
-    this.flushTimer = setTimeout(() => this.flushReads(), 600);
-  }
-
-  private async flushReads() {
-    this.flushTimer = null;
-    const batch = this.pendingReads.splice(0);
+  private capture(items: { epc: string; meta?: CaptureMeta }[]) {
     const visit = this.selectedVisit();
-    if (!batch.length || !visit) return;
-    try {
-      await this.api.addReads(this.inventory.id, visit.id, batch);
-      await Promise.all([this.loadPanel(), this.loadDetail()]);
-    } catch (e: any) {
-      batch.forEach((epc) => this.capturedEpcs.delete(epc)); // permite re-tentar
-      notify(e?.error?.message || 'Falha ao registrar leituras.', 'error', 3000);
+    if (!this.canCapture() || !visit) return;
+    const seen = this.capturedFor(visit.id);
+    const readAt = new Date().toISOString();
+    const fresh: QueuedRead[] = [];
+    for (const { epc, meta } of items) {
+      const norm = epc.trim().toUpperCase();
+      if (!norm || seen.has(norm)) continue; // já lida nesta visita (1× por tag)
+      seen.add(norm);
+      fresh.push({ epc: norm, readAt, ...meta });
     }
+    if (fresh.length) this.queue.enqueue(this.inventory.id, visit.id, fresh);
   }
 
-  /** Semeia o dedup com o que já foi lido na visita e zera a fila pendente. */
-  private seedCaptured() {
-    this.capturedEpcs = new Set(
-      (this.panel().read ?? []).map((r: any) => String(r.epc).toUpperCase()),
+  /** Conjunto de EPCs já registrados na visita: painel + fila + recém-enviados. */
+  private capturedFor(visitId: string): Set<string> {
+    let seen = this.captured.get(visitId);
+    if (!seen) {
+      seen = new Set(this.queue.unsentReadsFor(this.inventory.id, visitId).keys());
+      for (const s of this.sentAwaitingPanel().values()) if (s.visitId === visitId) seen.add(s.read.epc);
+      if (this.panelVisitId === visitId) {
+        for (const r of this.panel().read ?? []) seen.add(String(r.epc).toUpperCase());
+      }
+      this.captured.set(visitId, seen);
+    }
+    return seen;
+  }
+
+  /** Pendências descartadas: refazer o dedup para que essas tags possam ser lidas de novo. */
+  onDiscarded() {
+    this.captured.clear();
+    const v = this.selectedVisit();
+    if (v) this.capturedFor(v.id);
+  }
+
+  private onBatchSent(b: ReadBatch) {
+    if (b.inventoryId !== this.inventory.id) return;
+    this.sentAwaitingPanel.update((m) => {
+      const next = new Map(m);
+      for (const r of b.reads) next.set(`${b.sectorVisitId}|${r.epc}`, { visitId: b.sectorVisitId, read: r });
+      return next;
+    });
+    this.scheduleRefresh();
+  }
+
+  /** O painel é pesado no backend: no máximo um recarregamento a cada 2 s durante a leitura. */
+  private scheduleRefresh() {
+    if (this.refreshTimer) return;
+    const wait = Math.max(300, this.lastRefreshAt + 2000 - Date.now());
+    this.refreshTimer = setTimeout(async () => {
+      this.refreshTimer = null;
+      this.lastRefreshAt = Date.now();
+      await Promise.all([this.loadPanel(), this.loadDetail()]);
+    }, wait);
+  }
+
+  /**
+   * Antes de concluir setor / finalizar: para o leitor, envia a fila na hora e só libera
+   * se nada ficou para trás (pendente, retido ou recusado). Finalizar com pendência faria
+   * a conciliação marcar como "não localizados" bens que foram lidos.
+   */
+  private async ensureSent(visitId?: string): Promise<boolean> {
+    if (this.isNative && this.reader.reading()) {
+      await this.reader.stop();
+      // O plugin ainda entrega o último lote do tagsRead até batchIntervalMs depois de parar.
+      await new Promise((r) => setTimeout(r, (this.reader.status()?.batchIntervalMs ?? 200) + 150));
+    }
+    await this.queue.flushNow();
+    const s = this.queue.summaryFor(this.inventory.id, visitId);
+    if (!s.reads) return true;
+    const where = visitId ? 'deste setor' : 'deste inventário';
+    await alert(
+      `${s.reads} leituras ${where} ainda não chegaram ao servidor` +
+      (s.blocked + s.rejected ? ` (${s.blocked + s.rejected} retidas ou recusadas)` : '') +
+      '. Aguarde o envio — a fila tenta de novo sozinha quando a rede voltar — ou use ' +
+      '"Descartar pendências" se tiver certeza de que não precisa delas.',
+      visitId ? 'Concluir setor' : 'Finalizar inventário',
     );
-    this.pendingReads = [];
-    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    return false;
   }
 
   async completeSector() {
+    const visit = this.selectedVisit();
+    if (!visit) return;
     this.busy.set(true);
     try {
-      await this.api.completeSector(this.inventory.id, this.selectedVisit().id);
+      if (!(await this.ensureSent(visit.id))) return;
+      await this.api.completeSector(this.inventory.id, visit.id);
       await this.loadDetail();
       this.selectedVisit.update((v: any) => ({ ...v, status: 'completed' }));
       notify('Setor concluído.', 'success', 2000);
@@ -374,6 +509,9 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
   }
 
   async finish() {
+    this.busy.set(true);
+    const sent = await this.ensureSent().finally(() => this.busy.set(false));
+    if (!sent) return;
     const ok = await confirm(
       'A conciliação será executada com base em todos os setores concluídos. Deseja finalizar?',
       'Finalizar inventário',
@@ -381,6 +519,7 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
     if (!ok) return;
     this.busy.set(true);
     try {
+      if (!(await this.ensureSent())) return; // algo lido durante a confirmação
       await this.api.finish(this.inventory.id);
       this.finished.emit(this.inventory.id);
     } catch (e: any) {

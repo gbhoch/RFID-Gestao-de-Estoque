@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
@@ -26,7 +27,7 @@ import kotlinx.coroutines.cancel
 /**
  * Plugin Capacitor que expõe o leitor TSL (Bluetooth Classic) ao sistema web.
  *
- * Contrato TypeScript em frontend/src/app/features/reader-poc/rfid-reader.plugin.ts.
+ * Contrato TypeScript em frontend/src/app/core/rfid/rfid-reader.plugin.ts.
  *
  * Eventos:
  * - `tagsRead`          { tags: [{ epc, rssi?, count }] } — lote deduplicado por EPC a cada
@@ -233,6 +234,18 @@ class RfidReaderPlugin : Plugin() {
             return
         }
         call.resolve(JSObject().put("intervalMs", batcher.intervalMs))
+    }
+
+    /**
+     * Identificação do aparelho enviada como `deviceId` nas leituras: o ANDROID_ID, como no
+     * SyncRepository do app de referência. Desde o Android 8 o valor depende também da
+     * chave de assinatura do app, então os dois apps no mesmo aparelho podem divergir.
+     */
+    @PluginMethod
+    @Suppress("HardwareIds")
+    fun getDeviceId(call: PluginCall) {
+        val id = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        call.resolve(JSObject().put("deviceId", id ?: "desconhecido"))
     }
 
     // ------------------------------------------------------------- permissões

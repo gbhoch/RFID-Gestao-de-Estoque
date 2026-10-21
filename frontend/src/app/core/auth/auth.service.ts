@@ -11,6 +11,19 @@ interface AuthState {
 }
 const STORAGE_KEY = 'rfid_auth';
 
+/** `sub` do payload do JWT, sem validar a assinatura (isso é papel do backend). */
+function subjectOf(token: string | null): string | null {
+  const payload = token?.split('.')[1];
+  if (!payload) return null;
+  try {
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const sub = JSON.parse(json)?.sub;
+    return typeof sub === 'string' && sub ? sub : null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private http = inject(HttpClient);
@@ -20,6 +33,11 @@ export class AuthService {
   readonly user = computed(() => this.state().user);
   readonly isAuthenticated = computed(() => !!this.state().accessToken);
   readonly permissions = computed(() => this.state().user?.permissions ?? []);
+  /**
+   * Id do usuário logado. Depois de um reload o perfil ainda não chegou (/auth/me),
+   * mas o `sub` do access token já identifica o usuário — inclusive sem rede.
+   */
+  readonly userId = computed(() => this.state().user?.id ?? subjectOf(this.state().accessToken));
 
   accessToken(): string | null { return this.state().accessToken; }
   refreshTokenValue(): string | null { return this.state().refreshToken; }

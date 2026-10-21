@@ -1,8 +1,11 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { Capacitor } from '@capacitor/core';
 import { AuthService } from './core/auth/auth.service';
 import { ThemeService } from './core/theme.service';
+import notify from 'devextreme/ui/notify';
+import { confirm } from 'devextreme/ui/dialog';
+import { ReadSyncQueue } from './features/inventory/read-sync-queue.service';
 
 interface NavItem {
   label: string;
@@ -67,6 +70,13 @@ interface NavItem {
 
           <div class="spacer"></div>
 
+          @if (sync.summary().reads > 0) {
+            <a class="sync-chip" routerLink="/inventory" [class.bad]="sync.summary().blocked + sync.summary().rejected > 0"
+              title="Leituras de inventário ainda não aceitas pelo servidor">
+              {{ sync.summary().reads }} {{ sync.summary().reads === 1 ? 'leitura não enviada' : 'leituras não enviadas' }}
+            </a>
+          }
+
           <button class="icon-btn" (click)="theme.toggle()"
             [title]="theme.theme() === 'light' ? 'Tema escuro' : 'Tema claro'">
             @if (theme.theme() === 'light') {
@@ -87,7 +97,7 @@ interface NavItem {
               <span class="user-name">{{ auth.user()?.login || 'Usuário' }}</span>
               <span class="user-role">{{ roleLabel() }}</span>
             </div>
-            <button class="icon-btn" (click)="auth.logout()" title="Sair">
+            <button class="icon-btn" (click)="logout()" title="Sair">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -162,6 +172,12 @@ interface NavItem {
       border-bottom: 1px solid var(--border);
     }
     .spacer { flex: 1; }
+    .sync-chip {
+      font-size: 12.5px; font-weight: 600; white-space: nowrap;
+      padding: 5px 11px; border-radius: 999px; text-decoration: none;
+      background: rgba(192,138,30,.14); color: var(--warning);
+    }
+    .sync-chip.bad { background: rgba(192,67,47,.12); color: var(--danger); }
     .icon-btn {
       display: grid; place-items: center;
       width: 38px; height: 38px;
@@ -202,6 +218,8 @@ interface NavItem {
 export class ShellComponent {
   auth = inject(AuthService);
   theme = inject(ThemeService);
+  /** Instanciada aqui para enviar a fila em qualquer tela, não só na de Inventário. */
+  sync = inject(ReadSyncQueue);
   collapsed = signal(false);
 
   // Apenas rotas implementadas têm `route`; as demais ficam desabilitadas
@@ -257,6 +275,35 @@ export class ShellComponent {
     if (this.isNative && this.auth.isAuthenticated() && !this.auth.user()) {
       this.auth.loadProfile().subscribe({ error: () => {} });
     }
+
+    // Pré-carrega os chunks do inventário (o painel do leitor vai junto, no mesmo chunk):
+    // se a rede cair antes de o operador abrir a tela, ela ainda abre.
+    import('./features/inventory/inventory.component').catch(() => {});
+    import('./features/inventory/inventory-reconciliation.component').catch(() => {});
+
+    // Pendências deixadas por uma sessão anterior (expirada, app fechado, reload).
+    effect(() => {
+      const s = this.sync.restored();
+      if (!s) return;
+      notify(`Há ${s.reads} leituras de inventário de uma sessão anterior ainda não enviadas. ` +
+        'O envio foi retomado — acompanhe na tela de Inventário.', 'warning', 6000);
+      this.sync.restored.set(null);
+    });
+  }
+
+  /** Logout manual: tenta enviar a fila e avisa se ainda sobrar algo. */
+  async logout() {
+    if (this.sync.summary().reads > 0) await this.sync.flushNow();
+    const n = this.sync.summary().reads;
+    if (n > 0) {
+      const ok = await confirm(
+        `${n} leituras de inventário ainda não chegaram ao servidor. Elas ficam guardadas neste ` +
+        'aparelho e serão enviadas quando <b>este mesmo usuário</b> entrar de novo. Sair mesmo assim?',
+        'Leituras não enviadas',
+      );
+      if (!ok) return;
+    }
+    this.auth.logout();
   }
 
   initials() {
