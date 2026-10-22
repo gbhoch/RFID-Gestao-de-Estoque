@@ -15,3 +15,5 @@ out-tsc/
 # Logs e temporários
 *.log
 .DS_Store
+
+frontend/.angular/

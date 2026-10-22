@@ -43,8 +43,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: req.url,
       message,
-      ...(code ? { code } : {}),
+      ...(code ? { ...this.extractDetails(exception), code } : {}),
     });
+  }
+
+  /**
+   * Campos extras de uma exceção COM `code` (ex.: `sectors` de SECTOR_VISITS_OPEN).
+   * Só exceções com código levam detalhes: o corpo padrão do Nest (statusCode,
+   * error) continua de fora.
+   */
+  private extractDetails(exception: unknown): Record<string, unknown> {
+    const resp = (exception as HttpException).getResponse();
+    if (!resp || typeof resp !== 'object') return {};
+    const { message, statusCode, error, code, ...details } = resp as Record<string, unknown>;
+    return details;
   }
 
   /** Devolve `code` quando a exceção foi lançada com um objeto que o contenha. */

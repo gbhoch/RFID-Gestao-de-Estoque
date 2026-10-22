@@ -17,6 +17,8 @@ import { RfidReaderService } from './reader/rfid-reader.service';
 import { ReaderCaptureDirective } from '../../shared/reader-capture.directive';
 
 type CaptureMeta = Omit<QueuedRead, 'epc' | 'readAt'>;
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const EMPTY_PANEL = { expected: [] as any[], read: [] as any[] };
 
 @Component({
@@ -306,7 +308,7 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
     try {
       const d = await this.api.detail(this.inventory.id);
       this.detail.set(d);
-      // Leitura tardia reabre setor no servidor: manter o status da visita aberta em dia.
+      // Outro aparelho pode concluir/reabrir o setor: manter o status da visita aberta em dia.
       const sel = this.selectedVisit();
       const fresh = sel && (d?.visits ?? []).find((v: any) => v.id === sel.id);
       if (fresh && fresh.status !== sel.status) this.selectedVisit.set({ ...sel, ...fresh });
@@ -523,6 +525,18 @@ export class InventoryActiveComponent implements OnInit, OnDestroy {
       await this.api.finish(this.inventory.id);
       this.finished.emit(this.inventory.id);
     } catch (e: any) {
+      if (e?.error?.code === 'SECTOR_VISITS_OPEN') {
+        // Setor aberto ficaria fora da conciliação: o servidor recusa e diz quais são.
+        await this.loadDetail();
+        const names = (e.error.sectors ?? [])
+          .map((s: any) => `<li>${escapeHtml(s.name ?? this.sectorName(s.sectorId))}</li>`).join('');
+        await alert(
+          'Estes setores ainda estão em andamento e ficariam fora da conciliação:' +
+          `<ul>${names}</ul>Conclua cada um (ou reabra e termine a leitura) antes de finalizar.`,
+          'Finalizar inventário',
+        );
+        return;
+      }
       notify(e?.error?.message || 'Falha ao finalizar.', 'error', 3500);
     } finally { this.busy.set(false); }
   }

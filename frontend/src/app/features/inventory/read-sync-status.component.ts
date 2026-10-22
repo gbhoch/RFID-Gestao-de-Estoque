@@ -28,9 +28,8 @@ import { ReadSyncQueue } from './read-sync-queue.service';
           }
           <button class="btn ghost sm danger" [disabled]="busy()" (click)="discard()">Descartar pendências</button>
         </div>
-        @if (mine().blocked > 0) {
-          <p class="s-line">{{ mine().blocked }} retidas: o inventário está encerrado. Depois que o gestor
-            reabrir, use "Tentar retidas de novo".</p>
+        @for (g of blockedGroups(); track g.message) {
+          <p class="s-line">{{ g.reads }} retidas: {{ g.message }}</p>
         }
         @if (mine().rejected > 0) {
           <p class="s-line">{{ mine().rejected }} recusadas pelo servidor — não serão reenviadas.</p>
@@ -86,6 +85,22 @@ export class ReadSyncStatusComponent {
     this.inventoryId ? this.queue.summaryFor(this.inventoryId) : this.queue.summary());
   readonly others = computed(() =>
     this.inventoryId ? this.queue.summaryExcept(this.inventoryId) : this.queue.summary());
+
+  /** Leituras retidas agrupadas pelo motivo (cada motivo pede uma ação diferente). */
+  readonly blockedGroups = computed(() => {
+    const groups = new Map<string, number>();
+    for (const b of this.queue.batches()) {
+      if (b.state !== 'blocked' || (this.inventoryId && b.inventoryId !== this.inventoryId)) continue;
+      const message = b.blockedCode === 'SECTOR_VISIT_COMPLETED'
+        ? `${b.lastError ?? 'Setor já concluído — selecione o setor de novo para enviar estas leituras'}. ` +
+          'Depois de reabrir o setor, use "Tentar retidas de novo".'
+        : b.blockedCode === 'INVENTORY_FINISHED' || !b.blockedCode
+          ? 'o inventário está encerrado. Depois que o gestor reabrir, use "Tentar retidas de novo".'
+          : b.lastError ?? 'retido pelo servidor (HTTP 409).';
+      groups.set(message, (groups.get(message) ?? 0) + b.reads.length);
+    }
+    return [...groups].map(([message, reads]) => ({ message, reads }));
+  });
 
   async sendNow() {
     await this.withBusy(() => this.queue.flushNow());

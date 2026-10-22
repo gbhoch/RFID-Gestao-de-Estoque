@@ -11,8 +11,9 @@ export interface QueuedRead extends ReadItemBody {
 
 /**
  * pending  = aguardando envio (ou nova tentativa);
- * blocked  = 409: inventário encerrado — fica retido até o gestor reabrir e alguém pedir
- *            nova tentativa (mesma regra do coletor Android);
+ * blocked  = 409: fica retido até alguém pedir nova tentativa (mesma regra do coletor
+ *            Android). O motivo vem em blockedCode: INVENTORY_FINISHED (o gestor reabre o
+ *            inventário) ou SECTOR_VISIT_COMPLETED (o operador seleciona o setor de novo);
  * rejected = outro 4xx: o servidor recusou o lote; não adianta reenviar.
  */
 export type BatchState = 'pending' | 'blocked' | 'rejected';
@@ -28,6 +29,8 @@ export interface ReadBatch {
   attempts: number;
   createdAt: string;
   lastError?: string;
+  /** `code` do 409 que reteve o lote (ausente em lotes gravados antes desta versão). */
+  blockedCode?: string;
 }
 
 export interface QueueSummary {
@@ -50,7 +53,7 @@ const BACKOFF_MAX_MS = 60000;
 
 type Outcome =
   | { kind: 'retry'; message: string }
-  | { kind: 'blocked'; message: string }
+  | { kind: 'blocked'; message: string; code?: string }
   | { kind: 'rejected'; message: string };
 
 /**
@@ -246,8 +249,10 @@ export class ReadSyncQueue {
             return;
           }
           // Retido/recusado não segura o resto da fila (pode ser de outro inventário).
+          const blockedCode = outcome.kind === 'blocked' ? outcome.code : undefined;
           this.mutate(owner, (list) => list.map((b) =>
-            b.clientBatchId === next.clientBatchId ? { ...b, state: outcome.kind, lastError: outcome.message } : b));
+            b.clientBatchId === next.clientBatchId
+              ? { ...b, state: outcome.kind, lastError: outcome.message, blockedCode } : b));
           this.lastError.set(outcome.message);
         }
       }
@@ -347,7 +352,14 @@ function classify(e: unknown): Outcome {
   if (s === 0) return { kind: 'retry', message: 'Sem conexão com o servidor.' };
   if (s === 401) return { kind: 'retry', message: 'Sessão expirada — faça login para continuar o envio.' };
   if (s === 408 || s === 429 || s >= 500) return { kind: 'retry', message: `Servidor indisponível (HTTP ${s}).` };
-  if (s === 409) return { kind: 'blocked', message: message || 'Inventário encerrado.' };
+  if (s === 409) {
+    // Qualquer 409 retém (nunca descarta): inventário encerrado, setor já concluído…
+    const code = typeof e.error?.code === 'string' ? e.error.code : undefined;
+    const fallback = code === 'SECTOR_VISIT_COMPLETED'
+      ? 'Setor já concluído — selecione o setor de novo para enviar estas leituras'
+      : 'Inventário encerrado.';
+    return { kind: 'blocked', message: message || fallback, code };
+  }
   return { kind: 'rejected', message: message || `Lote recusado pelo servidor (HTTP ${s}).` };
 }
 

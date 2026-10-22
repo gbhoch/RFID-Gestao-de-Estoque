@@ -2,13 +2,14 @@ import {
   Injectable, NotFoundException, BadRequestException, ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Like, DataSource, Not, IsNull } from 'typeorm';
+import { Repository, In, Like, DataSource, Not, IsNull, EntityManager } from 'typeorm';
 import {
   InventoryOrmEntity, InventorySectorVisitOrmEntity,
   InventoryReadOrmEntity, InventoryDiscrepancyOrmEntity,
 } from '../infrastructure/inventory.orm-entity';
 import { AssetOrmEntity } from '../../assets/infrastructure/asset.orm-entity';
 import { RfidTagOrmEntity } from '../../rfid-tags/infrastructure/rfid-tag.orm-entity';
+import { SectorOrmEntity } from '../../sectors/infrastructure/sector.orm-entity';
 import {
   AssetMovementOrmEntity, AssetLocationHistoryOrmEntity,
 } from '../../movements/infrastructure/movement.orm-entity';
@@ -136,79 +137,126 @@ export class InventoryService {
   }
 
   // ---- Setores visitados (escopo aberto) ----
+  //
+  // Concorrência: selectSector, completeSector, addReads e finish rodam em
+  // transação e travam as mesmas linhas, sempre na mesma ordem (inventário,
+  // depois visita):
+  //  - inventário FOR SHARE nas operações de setor/leitura — elas correm em
+  //    paralelo entre si, mas o finish() (FOR UPDATE) espera as que estão em
+  //    curso e segura as novas até encerrar; essas então já veem 'finished';
+  //  - visita FOR UPDATE — "concluir setor" e "enviar leituras" no mesmo setor
+  //    se serializam: ou as leituras entram antes da conclusão, ou chegam depois
+  //    e recebem SECTOR_VISIT_COMPLETED. Nunca reabrem a visita por baixo.
+
+  /**
+   * Seleciona o setor no inventário (cria a visita se ainda não existe).
+   *
+   * É o ÚNICO caminho que reabre uma visita concluída: escolher o setor de novo
+   * é a reabertura explícita. addReads() nunca reabre — leitura atrasada em setor
+   * concluído recebe 409 SECTOR_VISIT_COMPLETED e fica retida no cliente até
+   * alguém reabrir por aqui.
+   */
   async selectSector(id: string, dto: SelectSectorDto) {
-    const inv = await this.getOpen(id);
-    let visit = await this.visits.findOne({ where: { inventoryId: inv.id, sectorId: dto.sectorId } });
-    if (!visit) {
-      visit = this.visits.create({ inventoryId: inv.id, sectorId: dto.sectorId, status: 'in_progress' });
-    } else if (visit.status === 'completed') {
-      visit.status = 'in_progress';       // reabrir para leituras adicionais
-      visit.completedAt = null;
-    }
-    return this.visits.save(visit);
+    return this.dataSource.transaction(async (m) => {
+      const inv = await this.lockOpen(m, id);
+      let visit = await m.findOne(InventorySectorVisitOrmEntity, {
+        where: { inventoryId: inv.id, sectorId: dto.sectorId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!visit) {
+        visit = m.create(InventorySectorVisitOrmEntity, {
+          inventoryId: inv.id, sectorId: dto.sectorId, status: 'in_progress',
+        });
+      } else if (visit.status === 'completed') {
+        visit.status = 'in_progress';       // reabertura explícita para leituras adicionais
+        visit.completedAt = null;
+      }
+      return m.save(visit);
+    });
   }
 
   async completeSector(id: string, visitId: string) {
-    await this.getOpen(id);
-    const visit = await this.getVisit(id, visitId);
-    visit.status = 'completed';
-    visit.completedAt = new Date();
-    return this.visits.save(visit);
+    return this.dataSource.transaction(async (m) => {
+      await this.lockOpen(m, id);
+      const visit = await this.lockVisit(m, id, visitId);
+      visit.status = 'completed';
+      visit.completedAt = new Date();
+      return m.save(visit);
+    });
   }
 
   // ---- Leituras: FATO BRUTO, sem julgamento ----
   async addReads(id: string, dto: AddReadsDto, operatorId: string) {
-    const inv = await this.findOne(id);
+    return this.dataSource.transaction(async (m) => {
+      const inv = await m.findOne(InventoryOrmEntity, { where: { id }, lock: { mode: 'pessimistic_read' } });
+      if (!inv) throw new NotFoundException('Inventário não encontrado');
 
-    // Inventário encerrado responde 409 (não 400) com código legível por máquina:
-    // o coletor Android trata 4xx como rejeição definitiva e DESCARTA a coleta.
-    // O 409 é o sinal de "segure para revisão" — o gestor pode reopen() e o
-    // próximo sync sobe a leitura em vez de perdê-la.
-    if (!OPEN_STATUSES.includes(inv.status))
-      throw new ConflictException({
-        code: 'INVENTORY_FINISHED',
-        message: `Inventário ${inv.code} já encerrado`,
+      // Inventário encerrado responde 409 (não 400) com código legível por máquina:
+      // o coletor Android trata 4xx como rejeição definitiva e DESCARTA a coleta.
+      // O 409 é o sinal de "segure para revisão" — o gestor pode reopen() e o
+      // próximo sync sobe a leitura em vez de perdê-la.
+      if (!OPEN_STATUSES.includes(inv.status))
+        throw new ConflictException({
+          code: 'INVENTORY_FINISHED',
+          message: `Inventário ${inv.code} já encerrado`,
+        });
+
+      // 'paused' também aceita leitura: leitura é fato bruto, pausa é estado de
+      // operação. Uma coleta offline pode chegar depois de o gestor pausar, e
+      // recusá-la perderia trabalho de campo já feito.
+      const visit = await this.lockVisit(m, id, dto.sectorVisitId);
+
+      if (visit.status === 'completed') {
+        // Reenvio de um lote que JÁ subiu (a resposta se perdeu e o setor foi
+        // concluído no meio): sucesso como antes, sem inserir nada. O insert é um
+        // único comando — o lote está gravado inteiro ou não está.
+        if (dto.clientBatchId && await m.exists(InventoryReadOrmEntity, {
+          where: { inventoryId: inv.id, sectorVisitId: visit.id, clientBatchId: dto.clientBatchId },
+        })) return { received: dto.reads.length, inserted: 0 };
+
+        // Leitura atrasada em setor concluído: recusa sem gravar e SEM reabrir.
+        // Reabrir em silêncio tirava o setor inteiro da conciliação (finish() só
+        // considera visitas concluídas). 409 = o cliente retém o lote; quem reabre
+        // é o operador, selecionando o setor de novo (selectSector).
+        const sector = await m.findOne(SectorOrmEntity, { where: { id: visit.sectorId } });
+        throw new ConflictException({
+          code: 'SECTOR_VISIT_COMPLETED',
+          message: `Setor ${sector?.name ?? visit.sectorId} já foi concluído — selecione o setor ` +
+            'de novo para enviar estas leituras',
+          sectorVisitId: visit.id,
+          sectorId: visit.sectorId,
+          sectorName: sector?.name ?? null,
+        });
+      }
+
+      if (!dto.reads.length) return { received: 0, inserted: 0 };
+
+      const resolved = await this.resolveEpcs(dto.reads.map((r) => r.epc), m);
+      const rows = dto.reads.map((r) => {
+        const res = resolved.get(r.epc);
+        return m.create(InventoryReadOrmEntity, {
+          inventoryId: inv.id,
+          sectorVisitId: visit.id,
+          epc: r.epc,
+          assetId: res?.assetId ?? null,
+          rfidTagId: res?.tagId ?? null,
+          deviceId: r.deviceId ?? null,
+          rssi: r.rssi ?? null,
+          operatorId,
+          readAt: r.readAt ? new Date(r.readAt) : new Date(),
+          clientBatchId: dto.clientBatchId ?? null,
+          readCount: r.readCount ?? 1,
+          tid: r.tid ?? null,
+        });
       });
 
-    // 'paused' também aceita leitura: leitura é fato bruto, pausa é estado de
-    // operação. Uma coleta offline pode chegar depois de o gestor pausar, e
-    // recusá-la perderia trabalho de campo já feito.
-    const visit = await this.getVisit(id, dto.sectorVisitId);
-    if (visit.status === 'completed') {
-      // Coleta que chegou tarde reabre o setor — mesma regra de selectSector().
-      visit.status = 'in_progress';
-      visit.completedAt = null;
-      await this.visits.save(visit);
-    }
-
-    if (!dto.reads.length) return { received: 0, inserted: 0 };
-
-    const resolved = await this.resolveEpcs(dto.reads.map((r) => r.epc));
-    const rows = dto.reads.map((r) => {
-      const res = resolved.get(r.epc);
-      return this.reads.create({
-        inventoryId: inv.id,
-        sectorVisitId: visit.id,
-        epc: r.epc,
-        assetId: res?.assetId ?? null,
-        rfidTagId: res?.tagId ?? null,
-        deviceId: r.deviceId ?? null,
-        rssi: r.rssi ?? null,
-        operatorId,
-        readAt: r.readAt ? new Date(r.readAt) : new Date(),
-        clientBatchId: dto.clientBatchId ?? null,
-        readCount: r.readCount ?? 1,
-        tid: r.tid ?? null,
-      });
+      // orIgnore() = ON CONFLICT DO NOTHING sobre o índice único parcial
+      // (client_batch_id, epc). É o que torna o reenvio do coletor inofensivo:
+      // ele repete o lote quando a resposta se perde, e a segunda vez é no-op.
+      const result = await m.createQueryBuilder()
+        .insert().into(InventoryReadOrmEntity).values(rows).orIgnore().execute();
+      const inserted = Array.isArray(result.raw) ? result.raw.length : rows.length;
+      return { received: rows.length, inserted };
     });
-
-    // orIgnore() = ON CONFLICT DO NOTHING sobre o índice único parcial
-    // (client_batch_id, epc). É o que torna o reenvio do coletor inofensivo:
-    // ele repete o lote quando a resposta se perde, e a segunda vez é no-op.
-    const result = await this.reads.createQueryBuilder()
-      .insert().values(rows).orIgnore().execute();
-    const inserted = Array.isArray(result.raw) ? result.raw.length : rows.length;
-    return { received: rows.length, inserted };
   }
 
   // ---- Painel visual (tempo real; NÃO persiste julgamento) ----
@@ -277,9 +325,33 @@ export class InventoryService {
   // ---- Finalização: dispara a CONCILIAÇÃO (transacional) ----
   async finish(id: string) {
     return this.dataSource.transaction(async (m) => {
-      const inv = await m.findOne(InventoryOrmEntity, { where: { id } });
+      // FOR UPDATE: espera leituras/conclusões em curso e segura as novas até o fim
+      // da conciliação (ver "Concorrência" acima de selectSector).
+      const inv = await m.findOne(InventoryOrmEntity, { where: { id }, lock: { mode: 'pessimistic_write' } });
       if (!inv) throw new NotFoundException('Inventário não encontrado');
       if (!OPEN_STATUSES.includes(inv.status)) throw new BadRequestException('Inventário já encerrado');
+
+      // Setor em andamento bloqueia a finalização: a conciliação só considera
+      // visitas concluídas, e o setor aberto sumiria dela sem aviso (seus bens não
+      // apareceriam nem como localizados nem como não localizados).
+      const openVisits = await m.find(InventorySectorVisitOrmEntity, {
+        where: { inventoryId: id, status: 'in_progress' }, order: { startedAt: 'ASC' },
+      });
+      if (openVisits.length) {
+        const names = new Map(
+          (await m.find(SectorOrmEntity, { where: { id: In(openVisits.map((v) => v.sectorId)) } }))
+            .map((sec) => [sec.id, sec.name]),
+        );
+        const sectors = openVisits.map((v) => ({
+          visitId: v.id, sectorId: v.sectorId, name: names.get(v.sectorId) ?? null,
+        }));
+        throw new ConflictException({
+          code: 'SECTOR_VISITS_OPEN',
+          message: 'Conclua os setores em andamento antes de finalizar: ' +
+            sectors.map((x) => x.name ?? x.sectorId).join(', '),
+          sectors,
+        });
+      }
 
       // SETORES_VISITADOS = visitas 'completed'.
       const completedVisits = await m.find(InventorySectorVisitOrmEntity, {
@@ -481,6 +553,23 @@ export class InventoryService {
     return inv;
   }
 
+  /** Trava o inventário (FOR SHARE) até o fim da transação e exige que esteja aberto. */
+  private async lockOpen(m: EntityManager, id: string) {
+    const inv = await m.findOne(InventoryOrmEntity, { where: { id }, lock: { mode: 'pessimistic_read' } });
+    if (!inv) throw new NotFoundException('Inventário não encontrado');
+    if (!OPEN_STATUSES.includes(inv.status)) throw new BadRequestException('Inventário já encerrado');
+    return inv;
+  }
+
+  /** Busca a visita travando-a (FOR UPDATE) até o fim da transação. */
+  private async lockVisit(m: EntityManager, inventoryId: string, visitId: string) {
+    const visit = await m.findOne(InventorySectorVisitOrmEntity, {
+      where: { id: visitId, inventoryId }, lock: { mode: 'pessimistic_write' },
+    });
+    if (!visit) throw new NotFoundException('Setor (visita) não encontrado neste inventário');
+    return visit;
+  }
+
   private async getVisit(inventoryId: string, visitId: string) {
     const visit = await this.visits.findOne({ where: { id: visitId, inventoryId } });
     if (!visit) throw new NotFoundException('Setor (visita) não encontrado neste inventário');
@@ -488,14 +577,17 @@ export class InventoryService {
   }
 
   /** Resolve cada EPC para { assetId, tagId, sectorId } (nulos quando não há tag/ativo). */
-  private async resolveEpcs(epcs: string[]) {
+  private async resolveEpcs(epcs: string[], m?: EntityManager) {
+    // Dentro de transação, usa a mesma conexão (não pega outra do pool com locks abertos).
+    const tagRepo = m ? m.getRepository(RfidTagOrmEntity) : this.tags;
+    const assetRepo = m ? m.getRepository(AssetOrmEntity) : this.assets;
     const map = new Map<string, { assetId: string | null; tagId: string | null; sectorId: string | null }>();
     const uniq = [...new Set(epcs)];
     if (!uniq.length) return map;
-    const tags = await this.tags.find({ where: { epc: In(uniq) } });
+    const tags = await tagRepo.find({ where: { epc: In(uniq) } });
     const tagByEpc = new Map(tags.map((t) => [t.epc, t]));
     const tagIds = tags.map((t) => t.id);
-    const assetsForTags = tagIds.length ? await this.assets.find({ where: { rfidTagId: In(tagIds) } }) : [];
+    const assetsForTags = tagIds.length ? await assetRepo.find({ where: { rfidTagId: In(tagIds) } }) : [];
     const assetByTagId = new Map(assetsForTags.map((a) => [a.rfidTagId, a]));
     for (const epc of uniq) {
       const tag = tagByEpc.get(epc);

@@ -32,9 +32,13 @@ Inventory (1)  ──►  InventorySectorVisit (N)  ──►  InventoryRead (N)
 
 - Só existe **um** inventário aberto (`in_progress`/`paused`) por vez.
 - Escopo **aberto**: setores entram conforme são visitados; um setor `completed` pode ser
-  reaberto para leituras adicionais.
+  reaberto para leituras adicionais — **só explicitamente**, selecionando-o de novo
+  (`POST /:id/sectors`). Leitura que chega num setor concluído recebe
+  `409 SECTOR_VISIT_COMPLETED` e não é gravada (exceto reenvio de um `clientBatchId` já
+  gravado, que responde sucesso sem inserir).
 - Conciliação considera apenas setores `completed`. Ativos de setores não visitados ficam
-  **fora do escopo** (não viram `not_found`).
+  **fora do escopo** (não viram `not_found`). Finalizar com setor `in_progress` é recusado
+  com `409 SECTOR_VISITS_OPEN` (lista de setores em `sectors`).
 
 ## Tipos de divergência e desfechos
 
